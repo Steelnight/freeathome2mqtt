@@ -3,13 +3,15 @@
 A high-performance bridge between an **ABB / Busch-Jaeger free@home** System Access Point (SysAP)
 and **MQTT**.
 
-> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap) and
-> [WP1](docs/11-implementation-plan.md#wp1--domain-codes-and-the-capture-tool) landed.** Bootstrap
-> tooling plus the generated pairing/function/parameter/interface code tables, the SysAP settings
-> pre-flight, the capture tool's pseudonymisation, and the `minimal`/`typical`/`nasty` configuration
-> fixtures are in place. No SysAP or MQTT connectivity exists yet. The documents under
-> [`docs/`](docs/) are written to be executed by an implementing agent (human or AI) top to bottom,
-> and [WP2](docs/11-implementation-plan.md#wp2--sysap-client) (the SysAP client) is next.
+> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP2](docs/11-implementation-plan.md#wp2--sysap-client)
+> landed.** Bootstrap tooling, the generated pairing/function/parameter/interface code tables, the
+> SysAP settings pre-flight, the capture tool's pseudonymisation, the `minimal`/`typical`/`nasty`
+> configuration fixtures, and now a real SysAP client — `RestClient` (typed errors, adaptive
+> concurrency, full-jitter backoff) and `WsReader` (heartbeat, idle watchdog, reconnect, startup
+> buffering) against a from-scratch fake SysAP — are all in place. No MQTT connectivity or domain
+> model exists yet. The documents under [`docs/`](docs/) are written to be executed by an
+> implementing agent (human or AI) top to bottom, and
+> [WP3](docs/11-implementation-plan.md#wp3--model-and-compiler) (the model and compiler) is next.
 
 ---
 

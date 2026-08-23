@@ -16,6 +16,10 @@
 
 ## 2. `config.yaml`
 
+The `sysap:` and `mqtt:` sections below are shown split into a "required" and an "optional"
+block for exposition. In a real file each top-level key appears **once** with its subkeys
+merged — the listing below is not valid YAML as printed (duplicate top-level keys).
+
 ```yaml
 # ---------------------------------------------------------------- required
 sysap:
@@ -62,7 +66,6 @@ homeassistant:
   discovery_topic: homeassistant
   status_topic: homeassistant/status
   republish_delay: 5                # seconds after an HA birth message
-  legacy_entity_attributes: false
 
 entities:
   topic_style: friendly             # friendly | id

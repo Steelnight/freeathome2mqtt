@@ -67,7 +67,7 @@ Derived from real installations; the implementation should hold these as test pa
 
 | Concern | Choice | Why |
 |---|---|---|
-| Language / runtime | **Python 3.12+** | The only comprehensive open-source mapping of free@home function → semantics is Python ([`local-abbfreeathome`](https://github.com/kingsleyadam/local-abbfreeathome)). This workload is I/O-bound; the CPU-heavy parts (JSON, TLS, MQTT framing) are all C extensions. |
+| Language / runtime | **Python ≥ 3.12** (the shipped container and the performance-budget reference run 3.13) | The only comprehensive open-source mapping of free@home function → semantics is Python ([`local-abbfreeathome`](https://github.com/kingsleyadam/local-abbfreeathome)). This workload is I/O-bound; the CPU-heavy parts (JSON, TLS, MQTT framing) are all C extensions. |
 | Event loop | **uvloop** | 2–4× throughput over the stdlib loop, one line to install, no API change. Fall back to the stdlib loop where unavailable (e.g. some musl builds). |
 | JSON | **orjson** | 3–10× faster than `json` and, crucially, parses the multi-MB config snapshot in a fraction of the time. Also faster to serialise the many small state payloads. |
 | HTTP + WS client | **aiohttp** | Proven against SysAP quirks (self-signed certs, `502` on overload, WS heartbeat). Single `ClientSession` for connection reuse. |
@@ -158,7 +158,7 @@ At startup, after fetching the configuration snapshot, walk every device → cha
 
 - `ingress: dict[str, Binding]` keyed by the exact WebSocket datapoint key
   (`"{serial}/{channel}/{odp}"`) → `(entity_index, attribute_index, codec, kind)`.
-- `egress: dict[tuple[int, int], EgressBinding]` keyed by `(entity_index, command_index)` →
+- `egress: dict[tuple[int, str], EgressBinding]` keyed by `(entity_index, command_name)` →
   the pre-formatted REST path `"{serial}.{channel}.{idp}"` plus the encoder.
 - `discovery: list[bytes]` — Home Assistant payloads pre-serialised, ready to publish verbatim.
 

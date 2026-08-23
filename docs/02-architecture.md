@@ -49,6 +49,7 @@ flowchart TB
     WSL -->|datapoints| ING
     WSL -->|devices/added/removed| SUP
     WSL -->|scenesTriggered| EVT
+    WSL -->|scenesTriggered values| ING
     SR -->|config snapshot| COMP
     PROF --> COMP
     COMP --> TBL
@@ -118,10 +119,12 @@ src/freeathome2mqtt/
 │
 ├── availability.py             # bridge + per-device availability (ADR-008)
 ├── persistence.py              # entities.json, config cache, atomic writes
-├── metrics.py                  # counters/histograms -> bridge/info + optional Prometheus
-└── tools/
-    ├── capture.py              # record a live SysAP into a test fixture
-    └── gen_codes.py            # regenerate sysap/codes/
+└── metrics.py                  # counters/histograms -> bridge/info + optional Prometheus
+
+# repo root (dev tooling, not shipped in the wheel; invoked as `uv run python tools/...`)
+tools/
+├── capture.py                  # record a live SysAP into a test fixture (also wired to cli.py --capture)
+└── gen_codes.py                # regenerate src/freeathome2mqtt/sysap/codes/
 ```
 
 Rules the layout enforces:

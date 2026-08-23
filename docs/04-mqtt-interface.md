@@ -67,7 +67,7 @@ Rules:
 
 - `id` is always present and immutable — key on it, not on the topic.
 - Unknown/uninitialised datapoints are `null`, never `0` or `false`.
-- `last_changed` is opt-in (`publish_last_changed`, default `true`). Note that it changes on every
+- `last_changed` is on by default and opt-out (`publish_last_changed`, default `true`). Note that it changes on every
   publish, which defeats byte-comparison deduplication for consumers; it is a genuine trade-off, so
   it is a flag.
 - Attribute names are stable per profile. Adding an attribute to a profile is a minor change;
@@ -391,5 +391,7 @@ useful middle ground, and the recommended setting for anyone filing an issue.
 - MQTT 5 is used when the broker supports it (for `maximumPacketSize` and better disconnect reason
   codes), falling back to 3.1.1 automatically.
 - After reconnect, retained messages are republished once (2 s later) for brokers that do not
-  persist retained state across restarts, then cancelled if the broker proves it did retain by
-  echoing `bridge/info` back.
+  persist retained state across restarts. This is unconditional: the bridge does not subscribe
+  to its own output topics ([ADR-006](00-overview-and-decisions.md#adr-006)), so it cannot
+  detect whether the broker retained them, and a single idempotent republish is cheap
+  ([`docs/06 §6`](06-resilience.md#6-failure-matrix) F8).

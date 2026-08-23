@@ -18,7 +18,7 @@ CI enforces these as regression gates with a 25 % tolerance band.
 | P4 | Scene burst: 500 datapoints over 40 entities → publishes | **≤ 40** | `bench_burst` |
 | P5 | Slider drag: 60 `/set` over 2 s → SysAP writes | **≤ 6** | `bench_command_debounce` |
 | P6 | Cold start (process → `bridge/state: online`), 1 000 channels | **≤ 3 s** | `bench_startup` |
-| P7 | Of which: config parse + compile | **≤ 400 ms** | `bench_compile` |
+| P7 | Of which: config parse + compile (walk/match/resolve/bind; **excludes** discovery pre-render, which `bench_compile` measures as a separate line) | **≤ 400 ms** | `bench_compile` |
 | P8 | Resync after a 60 s WS outage | **≤ 1.5 s**, **1** HTTP request | `bench_resync` |
 | P9 | RSS at 1 000 entities, steady state | **≤ 120 MB** | `bench_memory` |
 | P10 | Idle CPU (0.1 events/s) | **≤ 0.5 %** of one core | `bench_idle` |

@@ -9,6 +9,10 @@ directly. None of these block the plan; they should be resolved before the WP th
 Severity: **[A]** substantive contradiction (numbers/types that cannot all be true) ·
 **[B]** gap / underspecified (referenced but never defined) · **[C]** nit / wording.
 
+**Resolution status.** ✅ **Resolved in the plan:** A2, A3, A4, C1–C7.
+🟡 **Awaiting a decision (design choice):** A1, B1, B2 — see the notes on each below.
+⬜ **Still open (fold in later):** B3, B4, B5.
+
 ---
 
 ## A — Substantive contradictions

@@ -247,8 +247,8 @@ WP3/WP4 (pure, offline) and WP2/WP5 (I/O, needs fakes) can proceed in parallel a
 | Milestone | Packages | What works |
 |---|---|---|
 | **M1 — Walking skeleton** | WP0–WP2 | Connects, fetches config, prints devices. Nothing published. |
-| **M2 — Read-only bridge** | + WP3, WP5, WP6 | Live state on MQTT for tier-1 profiles. Genuinely useful already. |
-| **M3 — Bidirectional** | + WP4, WP7 | Commands work, with optimism and reconciliation. |
+| **M2 — Read-only bridge** | + WP3, WP4, WP5, WP6 | Live state on MQTT for tier-1 profiles. Genuinely useful already. |
+| **M3 — Bidirectional** | + WP7 | Commands work, with optimism and reconciliation. |
 | **M4 — Production shape** | + WP8, WP9 | Survives failures; bridge API; real configuration. |
 | **M5 — Home Assistant** | + WP10 | Zero-configuration HA integration. |
 | **M6 — 1.0** | + WP11, WP12 | Full coverage, containers, soak-verified. |

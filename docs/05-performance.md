@@ -148,20 +148,29 @@ class CommandCoalescer:
     timers:  dict[tuple[int, str], asyncio.TimerHandle]
 ```
 
-Leading-edge + trailing-edge:
+This is a leading-edge **throttle**, not a quiescence-reset debounce — it deliberately keeps
+streaming intermediate values during a continuous drag rather than sending nothing until the user
+pauses (which would make a slow drag "arrive late"):
 
 1. First `/set` for a key → send immediately, start the window.
 2. Further `/set` inside the window → overwrite `pending`, do **not** send.
 3. Window closes → if `pending` differs from what was last sent, send it and restart the window.
 
-A 2-second slider drag at 30 Hz produces 60 messages and **2 writes**: the first position and the
-final one (budget P5). Latency stays interactive because of the leading edge; the SysAP stays alive
-because of the trailing edge.
+The number of writes for a continuous drag of duration `D` is therefore `1 + floor(D / window)`
+(leading edge plus one per elapsed window), bounded above by `2 + D/window`
+([`docs/10 §5`](10-testing.md#5-property-based-tests)). A 2-second slider drag at 30 Hz produces
+60 messages and **≤ 6 writes** at the default window: the first position immediately, then the
+latest position roughly every window until the drag ends (budget P5). Latency stays interactive
+because of the leading edge; the SysAP stays alive because the write rate is capped at
+`1000/window` per second — well under the ≤ 10/s sustained-write budget
+([`docs/01 §8`](01-freeathome-api.md#8-rate-and-concurrency-limits)).
 
-Only `continuous: true` commands are debounced ([`docs/03 §3.3`](03-model-and-profiles.md#33-command-object)).
-Discrete commands go straight through — debouncing on/off would make light switches feel broken.
+Only `continuous: true` commands are throttled ([`docs/03 §3.3`](03-model-and-profiles.md#33-command-object)).
+Discrete commands go straight through — throttling on/off would make light switches feel broken.
 
-Debounce window default **50 ms**, overridable per entity via `bridge/request/entity/options`.
+Throttle window default **350 ms** (≈ 6 writes over a 2 s drag, ≈ 3 writes/s), overridable per
+entity via `bridge/request/entity/options`. Lowering it trades SysAP load for responsiveness; a
+window below 100 ms breaches the ≤ 10/s sustained-write budget during a continuous drag.
 
 ### 4.3 Config-reload debouncing
 

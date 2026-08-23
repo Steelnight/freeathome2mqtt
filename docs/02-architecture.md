@@ -254,7 +254,7 @@ sequenceDiagram
     M->>C: resolve entity, validate, encode
     C->>P: optimistic state (brightness=55, unconfirmed)
     P->>B: retained state publish
-    Note over C: continuous command:<br/>hold 50 ms, keep only latest
+    Note over C: continuous command:<br/>throttle window 350 ms, keep only latest
     C->>D: flush
     D->>R: acquire semaphore (max 4)
     R->>S: PUT .../ABB7F5.ch0003.idp0002  body "55"
@@ -271,9 +271,11 @@ Design points:
   setpoint, colour temperature — those are debounced. On/off, open/close/stop, lock/unlock go
   immediately. Debouncing an on/off would make the UI feel broken; not debouncing a slider melts
   the SysAP.
-- **Debounce is leading-edge + trailing-edge**: send the first value immediately for
-  responsiveness, then suppress until the window closes and send the final value. A slider drag
-  therefore produces 2 writes, not 60 and not 1-arriving-late.
+- **Throttling is leading-edge + per-window trailing**: send the first value immediately for
+  responsiveness, then at most one value per throttle window (the latest) until the drag ends. A
+  2 s slider drag therefore produces ≤ 6 writes, not 60 — and, unlike a quiescence-reset
+  debounce, never leaves an intermediate value un-sent while the drag is still moving
+  ([`docs/05 §4.2`](05-performance.md#42-command-debouncing)).
 - **The semaphore is the real rate limiter.** Under overload, commands queue in the debounce map
   (where they continue to collapse) rather than piling into in-flight requests.
 - **Failure is visible.** A failed write publishes an error to `bridge/response` (if the command

@@ -67,8 +67,10 @@ payload.
 ### P-08 — Brightness `0` used for off
 **Symptom** Setting brightness 0 leaves the light on at minimum, or the SysAP rejects the write.
 **Cause** `AL_ABSOLUTE_SET_VALUE_CONTROL` accepts `1..100`.
-**Mitigation** `range: [1, 100]` clamps; on/off is a separate command. HA's JSON light schema is
-handled by the profile mapping `brightness: 0` to `state: false`.
+**Mitigation** `range: [1, 100]` clamps a non-zero out-of-range value; a literal `0` is redirected
+to the on/off command by the command's `on_zero: { state: false }` hook
+([`docs/03 §3.3`](03-model-and-profiles.md#33-command-object)), so a plain dimmer needs no
+`transform`.
 **Test** `test_brightness_zero_maps_to_off`
 
 ### P-09 — Colour temperature treated as Kelvin

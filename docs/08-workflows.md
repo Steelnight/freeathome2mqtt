@@ -112,7 +112,7 @@ sequenceDiagram
     ST->>B: retained state publish (fast path for the UI)
     CQ->>RC: arm reconcile timer (3 s)
 
-    Note over CQ: continuous:true → leading edge sends now,<br/>further sets within 50 ms only update `pending`
+    Note over CQ: continuous:true → leading edge sends now,<br/>further sets within the 350 ms window only update `pending`
 
     CQ->>D: flush
     D->>D: await semaphore (max_inflight)

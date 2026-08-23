@@ -9,9 +9,15 @@ directly. None of these block the plan; they should be resolved before the WP th
 Severity: **[A]** substantive contradiction (numbers/types that cannot all be true) ·
 **[B]** gap / underspecified (referenced but never defined) · **[C]** nit / wording.
 
-**Resolution status.** ✅ **Resolved in the plan:** A2, A3, A4, C1–C7.
-🟡 **Awaiting a decision (design choice):** A1, B1, B2 — see the notes on each below.
+**Resolution status.** ✅ **Resolved in the plan:** A1, A2, A3, A4, B1, B2, C1–C7.
 ⬜ **Still open (fold in later):** B3, B4, B5.
+
+Decisions taken on the three that needed a design call:
+- **A1** — command throttling is a leading-edge + per-window throttle (not a quiescence-reset
+  debounce); default window raised 50 ms → **350 ms** so P5 (≤ 6 writes/2 s) holds, the ≤ 10/s
+  sustained-write cap is respected, and intermediate drag values are never dropped.
+- **B1** — added an explicit `primary:` profile key (defaults to the first-declared command).
+- **B2** — added a declarative `on_zero:` command hook so "brightness 0 = off" needs no transform.
 
 ---
 

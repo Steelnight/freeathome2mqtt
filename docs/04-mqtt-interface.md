@@ -119,8 +119,10 @@ Node-RED. JSON-decoded if it parses as JSON, otherwise treated as a string.
 ### 3.3 Scalar shorthand on `/set`
 
 A bare `ON`, `OFF`, `true`, `false`, `0`, `1` published to `<base>/<entity>/set` is interpreted as
-the entity's **primary** command (declared in the profile; `state` for most). This exists because
-Home Assistant's simpler component types and a lot of existing tooling send exactly this.
+the entity's **primary** command — the profile's `primary:` key, defaulting to the first declared
+command (`state` for most) ([`docs/03 §3.1`](03-model-and-profiles.md#31-schema-normative)). This
+exists because Home Assistant's simpler component types and a lot of existing tooling send exactly
+this.
 
 ### 3.4 `/get`
 
@@ -290,7 +292,8 @@ homeassistant/<component>/<node_id>/<object_id>/config
 ```
 
 - `<node_id>` = the entity id (`ABB7F500E17A_ch0003`) — stable, unique, and never changes on rename.
-- `<object_id>` = the attribute or the profile's primary object.
+- `<object_id>` = the attribute, or the profile's `primary:` command for single-object components
+  ([`docs/03 §3.1`](03-model-and-profiles.md#31-schema-normative)).
 
 ```json
 {

@@ -120,6 +120,10 @@ def test_profile_wellformed(profile):
             assert attr.values
     for cmd in profile.commands.values():
         assert cmd.optimistic is None or cmd.optimistic in profile.attributes
+        for target in cmd.on_zero or {}:
+            assert target in profile.commands, "on_zero must redirect to a sibling command"
+    assert profile.primary is None or profile.primary in profile.commands, \
+        "primary must name an existing command"
     assert not (set(profile.commands) - set(profile.attributes)) or profile.transform, \
         "a command with no corresponding attribute needs a transform to be observable"
 ```

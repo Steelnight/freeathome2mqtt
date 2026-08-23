@@ -81,7 +81,7 @@ performance:
   coalesce_adaptive: false
   coalesce_max_ms: 200
   coalesce_burst_threshold: 25
-  command_debounce_ms: 50           # continuous commands only
+  command_debounce_ms: 350          # continuous commands only; throttle window (docs/05 §4.2)
   optimistic: true                  # ADR-012
   reconcile_after_ms: 3000
   get_rate_limit_s: 5               # per entity

@@ -151,6 +151,8 @@ forking.
       default: unknown
       entity_category: diagnostic
 
+  primary: state                       # bare scalar on /set and HA object_id → this command
+
   commands:
     state:
       pairing: AL_SWITCH_ON_OFF        # INPUT pairing
@@ -163,6 +165,7 @@ forking.
       range: [1, 100]                  # clamped, not rejected — see §6
       continuous: true
       optimistic: brightness
+      on_zero: { state: false }        # brightness 0 = off, not minimum — see docs/01 §6.3, P-08
     forced_position:
       pairing: AL_FORCED
       codec: enum
@@ -189,6 +192,7 @@ forking.
 | `requires.outputs` / `requires.inputs` | list of `Pairing` names | no | Discriminator when several profiles claim a function |
 | `attributes.<name>` | object | yes (≥1) | See §3.2 |
 | `commands.<name>` | object | no | See §3.3 |
+| `primary` | command name | no | The command a bare scalar on `/set` maps to, and the attribute HA's `object_id` is seeded from ([`docs/04 §3.3`](04-mqtt-interface.md#33-scalar-shorthand-on-set), [`§6.1`](04-mqtt-interface.md#61-topic-and-payload)). Defaults to the **first declared** command; must name an existing command. |
 | `parameters.<name>` | `Parameter` name | no | Static values copied onto the entity |
 | `homeassistant` | object | no | Component mapping; see [`docs/04 §6`](04-mqtt-interface.md#6-home-assistant-discovery) |
 | `transform` | string | no | Named escape hatch; see §7 |
@@ -215,9 +219,10 @@ forking.
 | `codec` | yes | |
 | `values` | when `codec: enum` | Symbolic name → raw string (note: the *inverse* direction of an attribute's map) |
 | `range` | no | `[min, max]`, clamped |
-| `continuous` | no, default `false` | Debounce this command |
+| `continuous` | no, default `false` | Throttle this command ([`docs/05 §4.2`](05-performance.md#42-command-debouncing)) |
 | `optimistic` | no | Attribute name to update optimistically; omit to disable optimism for this command |
 | `confirm` | no, default `true` | Whether to expect a WS echo and reconcile if absent |
+| `on_zero` | no | `<command>: <symbolic value>` — when this command receives a value that would clamp to below its `range` minimum (e.g. `brightness: 0`), send the named sibling command with the given value **instead** (e.g. `state: false`). The declarative answer to "a dimmer's `0` means off, not minimum" ([`docs/01 §6.3`](01-freeathome-api.md#63-brightness-floor), P-08), so plain actuators need no `transform`. Redirects to exactly one sibling command; a cycle or unknown target fails the profile at load. |
 
 ### 3.4 Profile matching
 

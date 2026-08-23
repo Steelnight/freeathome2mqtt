@@ -1,0 +1,188 @@
+# CLAUDE.md
+
+Instructions for Claude Code (and any other agent) working in this repository.
+
+## What this project is
+
+`freeathome2mqtt` bridges an ABB/Busch-Jaeger free@home SysAP to MQTT. The full design —
+architecture, protocol reference, MQTT contract, performance budgets, failure modes, and a
+work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-and-decisions.md`](docs/00-overview-and-decisions.md).
+**Read `docs/` before writing code.** This file governs *how* code gets written; `docs/` governs
+*what* gets built and in what order ([`docs/11-implementation-plan.md`](docs/11-implementation-plan.md)).
+
+**Current status: design phase.** No implementation exists yet. [`docs/11 WP0`](docs/11-implementation-plan.md#wp0--bootstrap)
+is the first thing to build — `pyproject.toml`, lint/type config, package skeleton, CI. Nothing
+below this line works until WP0 lands; it describes the target state.
+
+---
+
+## 1. Test-Driven Development is mandatory, not a preference
+
+This is not "write tests eventually." It is the required order of operations for every change,
+without exception, including throwaway scripts under `tools/`.
+
+**Red → Green → Refactor, every time:**
+
+1. **Red.** Write a test that fails for the reason you expect. For most of this codebase the test
+   already exists in spec form — [`docs/09-pitfalls.md`](docs/09-pitfalls.md) names a test for
+   every one of its 60 entries, and each work package in
+   [`docs/11`](docs/11-implementation-plan.md) lists its acceptance tests explicitly. Find the
+   named test before inventing a new one; if none fits, write one and give it the same naming
+   convention (`test_<behavior>`), and if it closes a pitfall, note the ID in a comment
+   (`# closes P-07`).
+2. **Green.** Write the minimum code that passes. Not the most elegant code — the minimum. Resist
+   generalizing beyond what the failing test demands.
+3. **Refactor.** Clean up with the test suite green throughout. Re-run the *full* fast suite, not
+   just the test you were working on — a change in `model/` regularly breaks something in `bus/`
+   that a narrow run would miss.
+
+**Non-negotiables:**
+
+- No production code is written before a failing test exists for it. If you catch yourself writing
+  implementation first, stop, delete it or shelve it, write the test, watch it fail, then restore
+  the implementation.
+- A bug fix starts with a regression test that reproduces the bug and fails against the old code.
+  This is how every entry in `docs/09` should have been found in the first place, and how new ones
+  get added to the catalogue.
+- Performance is a test, not a vibe. The budgets in [`docs/05 §1`](docs/05-performance.md#1-budgets)
+  are enforced by the benchmark suite in [`docs/05 §8`](docs/05-performance.md#8-benchmarks) /
+  [`docs/10 §7`](docs/10-testing.md#7-benchmarks). A change that regresses a budget beyond
+  tolerance is a failing test, full stop — it does not get waved through because "it still works."
+- Coverage floors are a gate, not a target to approach asymptotically:
+  **90% lines / 85% branches** overall, **95%** for `model/` and `bus/`
+  ([`docs/10 §1`](docs/10-testing.md#1-shape-of-the-suite)). A PR that drops coverage below the
+  floor does not merge.
+- `model/` is pure by design specifically so it is exhaustively unit-testable — see
+  [`docs/02 §2`](docs/02-architecture.md#2-module-layout). If you find yourself wanting to add a
+  clock, a socket, or global state to `model/` to make something work, that thing belongs in
+  `bus/` or `supervisor.py` instead; don't compromise testability to avoid moving code.
+- Prefer the fake SysAP and an embedded broker (both real dependencies, not mocks) for anything
+  crossing a network boundary — see [`docs/10 §3`](docs/10-testing.md#3-fixtures-and-the-fake-sysap)
+  and [`§3.4`](docs/10-testing.md#34-the-broker). Mocking the MQTT client hides exactly the
+  retain/QoS/subscription bugs this project cares most about.
+- Property-based tests ([`docs/10 §5`](docs/10-testing.md#5-property-based-tests)) are required,
+  not optional extras, for anything with a stated invariant: codec totality, slug validity, compile
+  determinism, debounce bounds. An example-based test alone does not close these.
+
+---
+
+## 2. Power of 10 — adapted for this codebase
+
+The original ["Power of Ten" rules](https://en.wikipedia.org/wiki/The_Power_of_10:_Rules_for_Developing_Safety-Critical_Code)
+(Holzmann/JPL) were written for C in flight software. Python and asyncio don't have most of the
+same failure modes — but this bridge holds installer credentials to someone's electrical system,
+runs unattended for months, and talks to an embedded device that falls over under load. The spirit
+translates. Each rule below is the JPL original's intent, restated for this codebase, with how it's
+enforced. Treat these as review blockers, not style suggestions.
+
+### 1 — Simple control flow. No dynamic code execution on any value that came from outside the process.
+No `eval`, `exec`, `compile()`, or building a format string / regex from SysAP or MQTT payload
+data — both are untrusted input ([`docs/01 §5.2`](docs/01-freeathome-api.md#52-value-encoding),
+[`docs/09 §A`](docs/09-pitfalls.md#a-freehome-protocol)). No recursion over external, attacker- or
+device-influenced structures (config JSON, WS frames) — walk them with bounded `for` loops, as the
+compiler does. Nesting beyond three `if`/`elif` levels is a sign a lookup table or an early return
+is missing; refactor rather than add a fourth level.
+
+### 2 — Every loop and every long-lived task has an explicit, documented exit condition.
+A `while True:` in one of the supervisor's long-lived tasks
+([`docs/02 §3`](docs/02-architecture.md#3-concurrency-model)) must be driven by cancellation, an
+`asyncio.Event`, or a queue — never a bare infinite loop with no stop path — and must have a
+shutdown test proving it actually stops within the budget in
+[`docs/02 §8`](docs/02-architecture.md#8-shutdown). Every retry loop has a cap and a backoff
+policy ([`docs/06 §3`](docs/06-resilience.md#3-backoff-policy)); "retry forever with no delay" is
+never acceptable, even for a link the design says should retry indefinitely (SysAP, MQTT) — those
+loops still increase their delay each attempt.
+
+### 3 — No unbounded growth, especially on the hot path.
+This is rule R5 in [`docs/05 §3`](docs/05-performance.md#3-the-hot-path-rules) generalized: any
+collection that grows with *events* rather than with the fixed size of the installation is a bug.
+The dirty set, the debounce map, and the unconfirmed-command bitmask are all bounded by entity
+count by construction (ADR-005) — a new collection on a hot path must be justified the same way, in
+writing, before it's added. No per-event allocation of exceptions, temporary dicts, or f-strings in
+`bus/ingress.py`. Check new state against the memory budget in
+[`docs/05 §6`](docs/05-performance.md#6-memory) with `bench_memory`, not by eyeballing it.
+
+### 4 — Functions fit on one screen.
+Target ≤ 50 lines excluding docstring and blank lines, one responsibility. Enforced by
+`ruff` (`C901` complexity, `PLR0915`/`PLR0912` too-many-statements/branches) at zero tolerance —
+these are not warnings to silence with `noqa`, they're a signal to split the function. If a
+function needs a `# --- part 2 ---` comment to stay readable, it is two functions.
+
+### 5 — Assertion density, delivered as tests, not as `assert`.
+Python's `assert` is stripped under `-O` and this bridge cannot silently lose its safety checks in
+production, so it is never used to enforce an invariant that must hold at runtime — use an explicit
+`if ...: raise SpecificException(...)` at every trust boundary (config load, profile load, SysAP
+response parse, MQTT payload parse) instead. The "assertion density" JPL wants is delivered by
+tests: every public function in `model/`, `bus/`, and `sysap/` needs a test covering its boundary
+conditions — empty input, malformed input, the largest input it will realistically see — before
+it's considered done. This is restating §1 of this file with a number on it: it is the actual TDD
+gate, not a separate checkbox.
+
+### 6 — Smallest possible scope; almost no mutable global state.
+`model/` has zero mutable module-level state — it is pure functions over the arguments it's given
+([`docs/02 §2`](docs/02-architecture.md#2-module-layout)). Elsewhere, mutable state lives in
+exactly one owning object per concern (`StateStore` owns values and the dirty set,
+`CommandCoalescer` owns pending commands) and is passed explicitly, not reached via a module-level
+singleton. No mutable class attributes shared across instances (`class Foo: cache = {}`). If two
+pieces of code need to share state, that state gets a name, an owner, and a place in
+[`docs/02 §2`](docs/02-architecture.md#2-module-layout) — it doesn't become a global.
+
+### 7 — Check every return value; never swallow an exception.
+No bare `except:` and no `except Exception: pass`. Every caught exception is re-raised, logged with
+enough context to act on (entity id, datapoint key, request path — never the raw exception alone),
+or converted into one of the typed outcomes in the failure matrix
+([`docs/06 §6`](docs/06-resilience.md#6-failure-matrix)). Every value decoded from the SysAP or an
+MQTT payload goes through a codec or an explicit type check before use — no `data.get("x").get("y")`
+chains that assume a shape without checking it. `mypy --strict` treats an `Any` or unchecked
+`Optional` escaping a function boundary as a build failure, not a warning.
+
+### 8 — Limit metaprogramming to a small, closed set of well-understood patterns.
+No metaclasses, no monkey-patching, no `getattr`/`setattr`-based dynamic dispatch by string on any
+path that handles external input. Decorators are limited to well-understood library ones
+(`@dataclass`, `@property`, `@pytest.fixture`, `@pytest.mark.parametrize`). The one sanctioned
+dynamic-dispatch mechanism in this codebase is the `transform:` registry in `model/transforms.py`
+([`docs/03 §7`](docs/03-model-and-profiles.md#7-complex-profiles-and-the-transform-escape-hatch)) —
+a fixed, reviewed, named set of functions, not open lookup from arbitrary strings. Do not add a
+second one; if a device type seems to need it, it almost certainly needs a codec or a `requires`
+discriminator instead ([`docs/11 §6`](docs/11-implementation-plan.md#guidance-for-the-implementing-agent)).
+
+### 9 — Limit indirection; no deep attribute chains or callback soup on the hot path.
+No attribute chains deeper than two dots on a hot-path object — `entity.state_topic`, never
+`entity.device.installation.settings.topic`. The reference implementation's per-attribute callback
+registration pattern is explicitly rejected (see the anti-pattern table in
+[`docs/05 §7`](docs/05-performance.md#7-anti-patterns--explicitly-do-not-do-these)) in favor of
+direct, compiled dispatch. The one sanctioned "function pointer" pattern in this codebase is the
+compiled `Binding`/`EgressBinding` tables, where `decode`/`encode` callables are bound once at
+compile time and never looked up dynamically afterward
+([`docs/03 §2`](docs/03-model-and-profiles.md#2-runtime-representation)). Any new layer of
+indirection needs to justify itself against that pattern, not add a second, different one.
+
+### 10 — Zero warnings, statically verified, on every commit.
+`ruff check` and `ruff format --check` clean. `mypy --strict` clean — a `# type: ignore` requires
+an inline reason and is a red flag in review, not a routine occurrence. 100% type hints on public
+function signatures. No merged PR with a skipped, `xfail`, or commented-out test that isn't tracked
+back to an open issue. This is the CI gate in [`docs/10 §9`](docs/10-testing.md#9-ci-pipeline);
+nothing here should be new to anyone who has read it.
+
+---
+
+## 3. Commands
+
+These become real once [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap) lands (`pyproject.toml`,
+`ruff.toml`, `mypy` config, `pytest` markers). Use `uv` per the tooling choice in
+[`docs/00 §5`](docs/00-overview-and-decisions.md#5-technology-stack).
+
+```bash
+uv run pytest -m "not bench and not soak"   # fast suite — run this constantly
+uv run pytest --cov                          # with coverage; must hold the floors in §1
+uv run pytest -m bench                       # performance budgets (docs/05 §1, §8)
+uv run ruff check && uv run ruff format --check
+uv run mypy --strict src/
+uv run python tools/gen_codes.py --check     # generated code tables are still byte-identical
+```
+
+## 4. When this file and `docs/` disagree with reality
+
+Fix the document, in the same commit, and say why — per the closing guidance in
+[`docs/11`](docs/11-implementation-plan.md#guidance-for-the-implementing-agent). A stale plan that
+nobody corrects is worse than no plan. This file is not exempt from that rule either.

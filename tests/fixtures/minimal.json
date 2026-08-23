@@ -1,0 +1,56 @@
+{
+  "00000000-0000-0000-0000-000000000000": {
+    "sysapName": "Test Installation",
+    "sysap": {},
+    "users": {},
+    "floorplan": {
+      "floors": {
+        "01": {
+          "name": "Ground Floor",
+          "rooms": {
+            "01": {
+              "name": "Living Room"
+            }
+          }
+        }
+      }
+    },
+    "devices": {
+      "ABB700000001": {
+        "displayName": "Living Room Switch",
+        "deviceId": "1010",
+        "articleNumber": "2000/1.1",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "01"
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      }
+    }
+  }
+}

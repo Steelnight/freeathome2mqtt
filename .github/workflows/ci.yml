@@ -46,3 +46,15 @@ jobs:
       - run: uv python install
       - run: uv sync --group dev
       - run: uv run pytest -m "not bench and not soak"
+
+  gen-codes:
+    name: Generated code tables (docs/01 §7)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install
+      - run: uv sync --group dev
+      - run: uv run python -m freeathome2mqtt.tools.gen_codes --check

@@ -3,11 +3,13 @@
 A high-performance bridge between an **ABB / Busch-Jaeger free@home** System Access Point (SysAP)
 and **MQTT**.
 
-> **Status: bootstrap ([WP0](docs/11-implementation-plan.md#wp0--bootstrap)) landed.** The package
-> skeleton, lint/type/test tooling and CI are in place; no bridge behaviour is implemented yet. The
-> documents under [`docs/`](docs/) are written to be executed by an implementing agent (human or
-> AI) top to bottom, and [WP1](docs/11-implementation-plan.md#wp1--domain-codes-and-the-capture-tool)
-> is next.
+> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap) and
+> [WP1](docs/11-implementation-plan.md#wp1--domain-codes-and-the-capture-tool) landed.** Bootstrap
+> tooling plus the generated pairing/function/parameter/interface code tables, the SysAP settings
+> pre-flight, the capture tool's pseudonymisation, and the `minimal`/`typical`/`nasty` configuration
+> fixtures are in place. No SysAP or MQTT connectivity exists yet. The documents under
+> [`docs/`](docs/) are written to be executed by an implementing agent (human or AI) top to bottom,
+> and [WP2](docs/11-implementation-plan.md#wp2--sysap-client) (the SysAP client) is next.
 
 ---
 

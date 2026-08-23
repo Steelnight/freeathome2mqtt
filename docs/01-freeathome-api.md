@@ -427,22 +427,29 @@ reads for channels that were never going to echo.
 
 ## 7. Code tables to generate
 
-`tools/gen_codes.py` (WP1) produces `src/freeathome2mqtt/sysap/codes/`:
+`tools/gen_codes.py` (WP1) produces `src/freeathome2mqtt/sysap/codes/`, from frozen snapshots of
+`local-abbfreeathome` committed under `src/freeathome2mqtt/tools/vendor/` (see that directory's
+`README.md` for exact source URLs, retrieval dates and licence attribution) rather than by fetching
+the network at generation time — the generator must run offline and reproducibly.
 
 | File | Source | Content |
 |---|---|---|
-| `pairings.py` | `node-free-at-home/src/pairingIds.ts`, cross-checked with `GET /api/rest/pairings` | `Pairing` IntEnum, ~340 members |
-| `functions.py` | `node-free-at-home` function IDs, cross-checked with `local-abbfreeathome/bin/function.py` | `Function` IntEnum, ~650 members |
-| `parameters.py` | `local-abbfreeathome/bin/parameter.py` | `Parameter` IntEnum |
-| `interfaces.py` | §4.2 | `Interface` StrEnum |
-| `NOTICE` | — | Upstream licences and attribution |
+| `pairings.py` | `local-abbfreeathome`'s `src/abbfreeathome/bin/pairing.py` (MIT), itself converted from `node-free-at-home`'s `src/pairingIds.ts` (ISC) | `Pairing` IntEnum, 329 members |
+| `functions.py` | `local-abbfreeathome`'s `src/abbfreeathome/bin/function.py` (MIT), itself converted from `node-free-at-home`'s `src/functionIds.ts` (ISC) | `Function` IntEnum, 638 members (excludes that file's one package-custom, non-official member) |
+| `parameters.py` | `local-abbfreeathome`'s `src/abbfreeathome/bin/parameter.py` (MIT), itself converted from `node-free-at-home`'s `src/parameterIds.ts` (ISC) | `Parameter` IntEnum, 294 members |
+| `interfaces.py` | §4.2 (no upstream file; authored directly from this document) | `Interface` StrEnum |
+| `NOTICE` | — | Upstream licences and attribution (ADR-002) |
 
 Generated files are committed (so the build is hermetic and the tool is not needed at install time)
-and regenerated only deliberately. The generator must be **idempotent** — running it twice produces
-a byte-identical file — so it can be enforced in CI.
+and regenerated only deliberately. The generator is **idempotent** — running it twice produces
+byte-identical output — enforced in CI via `gen_codes.py --check`.
 
 Use `IntEnum`, not `Enum`: pairing IDs are compared against integers from JSON on the compile path,
 and `IntEnum` avoids a `.value` lookup everywhere.
+
+**⚠ verify empirically** — cross-checking `pairings.py` against a live `GET /api/rest/pairings`
+(as originally envisioned for this section) needs a real SysAP, which this environment does not
+have; it remains an open item in [`docs/10 §10`](10-testing.md#10-manual-verification-against-real-hardware).
 
 ---
 

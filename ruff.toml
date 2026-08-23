@@ -1,7 +1,7 @@
 target-version = "py314"
 line-length = 100
 src = ["src", "tests", "tools"]
-extend-exclude = ["docs"]
+extend-exclude = ["docs", "src/freeathome2mqtt/tools/vendor"]
 
 [lint]
 select = [

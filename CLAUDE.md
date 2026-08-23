@@ -10,13 +10,17 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
 **Read `docs/` before writing code.** This file governs *how* code gets written; `docs/` governs
 *what* gets built and in what order ([`docs/11-implementation-plan.md`](docs/11-implementation-plan.md)).
 
-**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap) landed.** `pyproject.toml`,
-`ruff.toml`, strict `mypy`/`pytest` config, the full package skeleton from
-[`docs/02 §2`](docs/02-architecture.md#2-module-layout) (every module a docstring-only stub) and CI
-(lint, type, test, coverage) are in place; the licence question is resolved (MIT, see `LICENSE` and
-[ADR-002](docs/00-overview-and-decisions.md#adr-002)). No behaviour is implemented yet — every
-module below WP0 is still a stub. [`docs/11 WP1`](docs/11-implementation-plan.md#wp1--domain-codes-and-the-capture-tool)
-(domain codes and the capture tool) is next.
+**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap) and
+[`WP1`](docs/11-implementation-plan.md#wp1--domain-codes-and-the-capture-tool) landed.**
+Bootstrap tooling (`pyproject.toml`, `ruff.toml`, strict `mypy`/`pytest` config, the package
+skeleton, CI, the MIT licence decision) is in place, plus WP1's domain codes and capture tool:
+`sysap/codes/{pairings,functions,parameters,interfaces}.py` generated from frozen vendor snapshots
+by `tools/gen_codes.py` (`--check` wired into CI), `sysap/schema.py` (config/WS TypedDicts + the
+P-06 functionID hex parser), `sysap/settings_probe.py` (version gate, serial, `jid` fallback),
+`tools/capture.py` (pseudonymisation), and the `minimal.json`/`typical.json`/`nasty.json` fixtures.
+Every module below that is still a docstring-only stub.
+[`docs/11 WP2`](docs/11-implementation-plan.md#wp2--sysap-client) (the SysAP REST/WS client and
+the fake SysAP) is next.
 
 ---
 

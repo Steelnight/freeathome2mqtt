@@ -1,0 +1,4042 @@
+{
+  "00000000-0000-0000-0000-000000000000": {
+    "sysapName": "Sample House",
+    "sysap": {},
+    "users": {},
+    "floorplan": {
+      "floors": {
+        "00": {
+          "name": "Basement",
+          "rooms": {
+            "09": {
+              "name": "Garage"
+            },
+            "0A": {
+              "name": "Basement"
+            },
+            "0C": {
+              "name": "Utility Room"
+            }
+          }
+        },
+        "01": {
+          "name": "Ground Floor",
+          "rooms": {
+            "01": {
+              "name": "Living Room"
+            },
+            "02": {
+              "name": "Kitchen"
+            },
+            "03": {
+              "name": "Hallway"
+            },
+            "04": {
+              "name": "Bedroom 1"
+            },
+            "05": {
+              "name": "Bedroom 2"
+            },
+            "06": {
+              "name": "Bedroom 3"
+            },
+            "07": {
+              "name": "Bathroom"
+            },
+            "08": {
+              "name": "Office"
+            }
+          }
+        }
+      }
+    },
+    "devices": {
+      "ABB700000002": {
+        "displayName": "6-Gang Actuator 1",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 1.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "01"
+          },
+          "ch0001": {
+            "displayName": "Switch 1.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "01"
+          },
+          "ch0002": {
+            "displayName": "Switch 1.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "01"
+          },
+          "ch0003": {
+            "displayName": "Switch 1.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "01"
+          },
+          "ch0004": {
+            "displayName": "Switch 1.5",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "01"
+          },
+          "ch0005": {
+            "displayName": "Switch 1.6",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "01"
+          }
+        }
+      },
+      "ABB700000003": {
+        "displayName": "6-Gang Actuator 2",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 2.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "02"
+          },
+          "ch0001": {
+            "displayName": "Switch 2.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "02"
+          },
+          "ch0002": {
+            "displayName": "Switch 2.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "02"
+          },
+          "ch0003": {
+            "displayName": "Switch 2.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "02"
+          },
+          "ch0004": {
+            "displayName": "Switch 2.5",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "02"
+          },
+          "ch0005": {
+            "displayName": "Switch 2.6",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "02"
+          }
+        }
+      },
+      "ABB700000004": {
+        "displayName": "6-Gang Actuator 3",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 3.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "03"
+          },
+          "ch0001": {
+            "displayName": "Switch 3.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "03"
+          },
+          "ch0002": {
+            "displayName": "Switch 3.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "03"
+          },
+          "ch0003": {
+            "displayName": "Switch 3.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "03"
+          },
+          "ch0004": {
+            "displayName": "Switch 3.5",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "03"
+          },
+          "ch0005": {
+            "displayName": "Switch 3.6",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "03"
+          }
+        }
+      },
+      "ABB700000005": {
+        "displayName": "6-Gang Actuator 4",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 4.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "04"
+          },
+          "ch0001": {
+            "displayName": "Switch 4.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "04"
+          },
+          "ch0002": {
+            "displayName": "Switch 4.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "04"
+          },
+          "ch0003": {
+            "displayName": "Switch 4.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "04"
+          },
+          "ch0004": {
+            "displayName": "Switch 4.5",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "04"
+          },
+          "ch0005": {
+            "displayName": "Switch 4.6",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "04"
+          }
+        }
+      },
+      "ABB700000006": {
+        "displayName": "6-Gang Actuator 5",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 5.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "05"
+          },
+          "ch0001": {
+            "displayName": "Switch 5.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "05"
+          },
+          "ch0002": {
+            "displayName": "Switch 5.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "05"
+          },
+          "ch0003": {
+            "displayName": "Switch 5.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "05"
+          },
+          "ch0004": {
+            "displayName": "Switch 5.5",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "05"
+          },
+          "ch0005": {
+            "displayName": "Switch 5.6",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "05"
+          }
+        }
+      },
+      "ABB700000007": {
+        "displayName": "6-Gang Actuator 6",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 6.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "06"
+          },
+          "ch0001": {
+            "displayName": "Switch 6.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "06"
+          },
+          "ch0002": {
+            "displayName": "Switch 6.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "06"
+          },
+          "ch0003": {
+            "displayName": "Switch 6.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "06"
+          },
+          "ch0004": {
+            "displayName": "Switch 6.5",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "06"
+          },
+          "ch0005": {
+            "displayName": "Switch 6.6",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "06"
+          }
+        }
+      },
+      "ABB700000008": {
+        "displayName": "6-Gang Actuator 7",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 7.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "07"
+          },
+          "ch0001": {
+            "displayName": "Switch 7.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "07"
+          },
+          "ch0002": {
+            "displayName": "Switch 7.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "07"
+          },
+          "ch0003": {
+            "displayName": "Switch 7.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "07"
+          },
+          "ch0004": {
+            "displayName": "Switch 7.5",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "07"
+          },
+          "ch0005": {
+            "displayName": "Switch 7.6",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "07"
+          }
+        }
+      },
+      "ABB700000009": {
+        "displayName": "6-Gang Actuator 8",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 8.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "08"
+          },
+          "ch0001": {
+            "displayName": "Switch 8.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "08"
+          },
+          "ch0002": {
+            "displayName": "Switch 8.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "08"
+          },
+          "ch0003": {
+            "displayName": "Switch 8.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "08"
+          },
+          "ch0004": {
+            "displayName": "Switch 8.5",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "08"
+          },
+          "ch0005": {
+            "displayName": "Switch 8.6",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "08"
+          }
+        }
+      },
+      "ABB70000000A": {
+        "displayName": "6-Gang Actuator 9",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 9.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "09"
+          },
+          "ch0001": {
+            "displayName": "Switch 9.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "09"
+          },
+          "ch0002": {
+            "displayName": "Switch 9.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "09"
+          },
+          "ch0003": {
+            "displayName": "Switch 9.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "09"
+          },
+          "ch0004": {
+            "displayName": "Switch 9.5",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "09"
+          },
+          "ch0005": {
+            "displayName": "Switch 9.6",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "09"
+          }
+        }
+      },
+      "ABB70000000B": {
+        "displayName": "6-Gang Actuator 10",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 10.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0A"
+          },
+          "ch0001": {
+            "displayName": "Switch 10.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0A"
+          },
+          "ch0002": {
+            "displayName": "Switch 10.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0A"
+          },
+          "ch0003": {
+            "displayName": "Switch 10.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0A"
+          },
+          "ch0004": {
+            "displayName": "Switch 10.5",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0A"
+          },
+          "ch0005": {
+            "displayName": "Switch 10.6",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0A"
+          }
+        }
+      },
+      "ABB70000000C": {
+        "displayName": "6-Gang Actuator 11",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 11.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0B"
+          },
+          "ch0001": {
+            "displayName": "Switch 11.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0B"
+          },
+          "ch0002": {
+            "displayName": "Switch 11.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0B"
+          },
+          "ch0003": {
+            "displayName": "Switch 11.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0B"
+          },
+          "ch0004": {
+            "displayName": "Switch 11.5",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0B"
+          },
+          "ch0005": {
+            "displayName": "Switch 11.6",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0B"
+          }
+        }
+      },
+      "ABB70000000D": {
+        "displayName": "6-Gang Actuator 12",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 12.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0C"
+          },
+          "ch0001": {
+            "displayName": "Switch 12.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0C"
+          },
+          "ch0002": {
+            "displayName": "Switch 12.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0C"
+          },
+          "ch0003": {
+            "displayName": "Switch 12.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0C"
+          },
+          "ch0004": {
+            "displayName": "Switch 12.5",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0C"
+          },
+          "ch0005": {
+            "displayName": "Switch 12.6",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "0C"
+          }
+        }
+      },
+      "ABB70000000E": {
+        "displayName": "6-Gang Actuator 13",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 13.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "01"
+          },
+          "ch0001": {
+            "displayName": "Switch 13.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "01"
+          },
+          "ch0002": {
+            "displayName": "Switch 13.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "01"
+          },
+          "ch0003": {
+            "displayName": "Switch 13.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "01"
+          },
+          "ch0004": {
+            "displayName": "Switch 13.5",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "01"
+          },
+          "ch0005": {
+            "displayName": "Switch 13.6",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "01"
+          }
+        }
+      },
+      "ABB70000000F": {
+        "displayName": "6-Gang Actuator 14",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 14.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "02"
+          },
+          "ch0001": {
+            "displayName": "Switch 14.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "02"
+          },
+          "ch0002": {
+            "displayName": "Switch 14.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "02"
+          },
+          "ch0003": {
+            "displayName": "Switch 14.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "02"
+          },
+          "ch0004": {
+            "displayName": "Switch 14.5",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "02"
+          },
+          "ch0005": {
+            "displayName": "Switch 14.6",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "02"
+          }
+        }
+      },
+      "ABB700000010": {
+        "displayName": "6-Gang Actuator 15",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 15.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "03"
+          },
+          "ch0001": {
+            "displayName": "Switch 15.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "03"
+          },
+          "ch0002": {
+            "displayName": "Switch 15.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "03"
+          },
+          "ch0003": {
+            "displayName": "Switch 15.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "03"
+          },
+          "ch0004": {
+            "displayName": "Switch 15.5",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "03"
+          },
+          "ch0005": {
+            "displayName": "Switch 15.6",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "03"
+          }
+        }
+      },
+      "ABB700000011": {
+        "displayName": "6-Gang Actuator 16",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 16.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "04"
+          },
+          "ch0001": {
+            "displayName": "Switch 16.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "04"
+          },
+          "ch0002": {
+            "displayName": "Switch 16.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "04"
+          },
+          "ch0003": {
+            "displayName": "Switch 16.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "04"
+          },
+          "ch0004": {
+            "displayName": "Switch 16.5",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "04"
+          },
+          "ch0005": {
+            "displayName": "Switch 16.6",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "04"
+          }
+        }
+      },
+      "ABB700000012": {
+        "displayName": "4-Gang Actuator 1",
+        "deviceId": "2020",
+        "articleNumber": "1032-2-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 1.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "05"
+          },
+          "ch0001": {
+            "displayName": "Switch 1.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "05"
+          },
+          "ch0002": {
+            "displayName": "Switch 1.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "05"
+          },
+          "ch0003": {
+            "displayName": "Switch 1.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "05"
+          }
+        }
+      },
+      "ABB700000013": {
+        "displayName": "4-Gang Actuator 2",
+        "deviceId": "2020",
+        "articleNumber": "1032-2-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 2.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "06"
+          },
+          "ch0001": {
+            "displayName": "Switch 2.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "06"
+          },
+          "ch0002": {
+            "displayName": "Switch 2.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "06"
+          },
+          "ch0003": {
+            "displayName": "Switch 2.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "06"
+          }
+        }
+      },
+      "ABB700000014": {
+        "displayName": "4-Gang Actuator 3",
+        "deviceId": "2020",
+        "articleNumber": "1032-2-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 3.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "07"
+          },
+          "ch0001": {
+            "displayName": "Switch 3.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "07"
+          },
+          "ch0002": {
+            "displayName": "Switch 3.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "07"
+          },
+          "ch0003": {
+            "displayName": "Switch 3.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "07"
+          }
+        }
+      },
+      "ABB700000015": {
+        "displayName": "4-Gang Actuator 4",
+        "deviceId": "2020",
+        "articleNumber": "1032-2-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 4.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "08"
+          },
+          "ch0001": {
+            "displayName": "Switch 4.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "08"
+          },
+          "ch0002": {
+            "displayName": "Switch 4.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "08"
+          },
+          "ch0003": {
+            "displayName": "Switch 4.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "08"
+          }
+        }
+      },
+      "ABB700000016": {
+        "displayName": "4-Gang Actuator 5",
+        "deviceId": "2020",
+        "articleNumber": "1032-2-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Switch 5.1",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "09"
+          },
+          "ch0001": {
+            "displayName": "Switch 5.2",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "09"
+          },
+          "ch0002": {
+            "displayName": "Switch 5.3",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "09"
+          },
+          "ch0003": {
+            "displayName": "Switch 5.4",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "00",
+            "room": "09"
+          }
+        }
+      },
+      "ABB700000017": {
+        "displayName": "Dimmer 1",
+        "deviceId": "1021",
+        "articleNumber": "6523-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Dimmer 1.1",
+            "functionID": "12",
+            "type": "DimmingActuator",
+            "floor": "00",
+            "room": "0A",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 17,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              },
+              "odp0001": {
+                "pairingID": 272,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0001": {
+            "displayName": "Dimmer 1.2",
+            "functionID": "12",
+            "type": "DimmingActuator",
+            "floor": "00",
+            "room": "0A",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 17,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              },
+              "odp0001": {
+                "pairingID": 272,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB700000018": {
+        "displayName": "Dimmer 2",
+        "deviceId": "1021",
+        "articleNumber": "6523-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Dimmer 2.1",
+            "functionID": "12",
+            "type": "DimmingActuator",
+            "floor": "00",
+            "room": "0B",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 17,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              },
+              "odp0001": {
+                "pairingID": 272,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0001": {
+            "displayName": "Dimmer 2.2",
+            "functionID": "12",
+            "type": "DimmingActuator",
+            "floor": "00",
+            "room": "0B",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 17,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              },
+              "odp0001": {
+                "pairingID": 272,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB700000019": {
+        "displayName": "Dimmer 3",
+        "deviceId": "1021",
+        "articleNumber": "6523-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Dimmer 3.1",
+            "functionID": "12",
+            "type": "DimmingActuator",
+            "floor": "00",
+            "room": "0C",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 17,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              },
+              "odp0001": {
+                "pairingID": 272,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0001": {
+            "displayName": "Dimmer 3.2",
+            "functionID": "12",
+            "type": "DimmingActuator",
+            "floor": "00",
+            "room": "0C",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 17,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              },
+              "odp0001": {
+                "pairingID": 272,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB70000001A": {
+        "displayName": "Dimmer 4",
+        "deviceId": "1021",
+        "articleNumber": "6523-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Dimmer 4.1",
+            "functionID": "12",
+            "type": "DimmingActuator",
+            "floor": "01",
+            "room": "01",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 17,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              },
+              "odp0001": {
+                "pairingID": 272,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0001": {
+            "displayName": "Dimmer 4.2",
+            "functionID": "12",
+            "type": "DimmingActuator",
+            "floor": "01",
+            "room": "01",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 17,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              },
+              "odp0001": {
+                "pairingID": 272,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB70000001B": {
+        "displayName": "Dimmer 5",
+        "deviceId": "1021",
+        "articleNumber": "6523-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Dimmer 5.1",
+            "functionID": "12",
+            "type": "DimmingActuator",
+            "floor": "01",
+            "room": "02",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 17,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              },
+              "odp0001": {
+                "pairingID": 272,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0001": {
+            "displayName": "Dimmer 5.2",
+            "functionID": "12",
+            "type": "DimmingActuator",
+            "floor": "01",
+            "room": "02",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 17,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              },
+              "odp0001": {
+                "pairingID": 272,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB70000001C": {
+        "displayName": "Dimmer 6",
+        "deviceId": "1021",
+        "articleNumber": "6523-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Dimmer 6.1",
+            "functionID": "12",
+            "type": "DimmingActuator",
+            "floor": "01",
+            "room": "03",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 17,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              },
+              "odp0001": {
+                "pairingID": 272,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0001": {
+            "displayName": "Dimmer 6.2",
+            "functionID": "12",
+            "type": "DimmingActuator",
+            "floor": "01",
+            "room": "03",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 17,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              },
+              "odp0001": {
+                "pairingID": 272,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB70000001D": {
+        "displayName": "Shutter Actuator 1",
+        "deviceId": "1015",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Shutter 1.1",
+            "functionID": "9",
+            "type": "ShutterActuator",
+            "floor": "01",
+            "room": "04",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 32,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 35,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 289,
+                "value": "0"
+              }
+            },
+            "parameters": {
+              "par0010": "30000",
+              "par0011": "30000"
+            }
+          },
+          "ch0001": {
+            "displayName": "Shutter 1.2",
+            "functionID": "9",
+            "type": "ShutterActuator",
+            "floor": "01",
+            "room": "04",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 32,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 35,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 289,
+                "value": "0"
+              }
+            },
+            "parameters": {
+              "par0010": "30000",
+              "par0011": "30000"
+            }
+          }
+        }
+      },
+      "ABB70000001E": {
+        "displayName": "Shutter Actuator 2",
+        "deviceId": "1015",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Shutter 2.1",
+            "functionID": "9",
+            "type": "ShutterActuator",
+            "floor": "01",
+            "room": "05",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 32,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 35,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 289,
+                "value": "0"
+              }
+            },
+            "parameters": {
+              "par0010": "30000",
+              "par0011": "30000"
+            }
+          },
+          "ch0001": {
+            "displayName": "Shutter 2.2",
+            "functionID": "9",
+            "type": "ShutterActuator",
+            "floor": "01",
+            "room": "05",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 32,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 35,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 289,
+                "value": "0"
+              }
+            },
+            "parameters": {
+              "par0010": "30000",
+              "par0011": "30000"
+            }
+          }
+        }
+      },
+      "ABB70000001F": {
+        "displayName": "Shutter Actuator 3",
+        "deviceId": "1015",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Shutter 3.1",
+            "functionID": "9",
+            "type": "ShutterActuator",
+            "floor": "01",
+            "room": "06",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 32,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 35,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 289,
+                "value": "0"
+              }
+            },
+            "parameters": {
+              "par0010": "30000",
+              "par0011": "30000"
+            }
+          },
+          "ch0001": {
+            "displayName": "Shutter 3.2",
+            "functionID": "9",
+            "type": "ShutterActuator",
+            "floor": "01",
+            "room": "06",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 32,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 35,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 289,
+                "value": "0"
+              }
+            },
+            "parameters": {
+              "par0010": "30000",
+              "par0011": "30000"
+            }
+          }
+        }
+      },
+      "ABB700000020": {
+        "displayName": "Shutter Actuator 4",
+        "deviceId": "1015",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Shutter 4.1",
+            "functionID": "9",
+            "type": "ShutterActuator",
+            "floor": "01",
+            "room": "07",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 32,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 35,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 289,
+                "value": "0"
+              }
+            },
+            "parameters": {
+              "par0010": "30000",
+              "par0011": "30000"
+            }
+          },
+          "ch0001": {
+            "displayName": "Shutter 4.2",
+            "functionID": "9",
+            "type": "ShutterActuator",
+            "floor": "01",
+            "room": "07",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 32,
+                "value": "0"
+              },
+              "idp0001": {
+                "pairingID": 35,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 289,
+                "value": "0"
+              }
+            },
+            "parameters": {
+              "par0010": "30000",
+              "par0011": "30000"
+            }
+          }
+        }
+      },
+      "ABB700000021": {
+        "displayName": "Window Sensor 1",
+        "deviceId": "9008",
+        "articleNumber": "6820-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Window 1",
+            "functionID": "F",
+            "type": "WindowDoorSensor",
+            "floor": "01",
+            "room": "08",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 53,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB700000022": {
+        "displayName": "Window Sensor 2",
+        "deviceId": "9008",
+        "articleNumber": "6820-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Window 2",
+            "functionID": "F",
+            "type": "WindowDoorSensor",
+            "floor": "00",
+            "room": "09",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 53,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB700000023": {
+        "displayName": "Window Sensor 3",
+        "deviceId": "9008",
+        "articleNumber": "6820-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Window 3",
+            "functionID": "F",
+            "type": "WindowDoorSensor",
+            "floor": "00",
+            "room": "0A",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 53,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB700000024": {
+        "displayName": "Movement Detector 1",
+        "deviceId": "9004",
+        "articleNumber": "6800-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Movement 1",
+            "functionID": "11",
+            "type": "MovementDetector",
+            "floor": "00",
+            "room": "0B",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 358,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB700000025": {
+        "displayName": "Movement Detector 2",
+        "deviceId": "9004",
+        "articleNumber": "6800-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Movement 2",
+            "functionID": "11",
+            "type": "MovementDetector",
+            "floor": "00",
+            "room": "0C",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 358,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB700000026": {
+        "displayName": "Brightness Sensor 1",
+        "deviceId": "9004",
+        "articleNumber": "6800-2-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Brightness 1",
+            "functionID": "41",
+            "type": "BrightnessSensor",
+            "floor": "01",
+            "room": "01",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1027,
+                "value": "234"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB700000027": {
+        "displayName": "Brightness Sensor 2",
+        "deviceId": "9004",
+        "articleNumber": "6800-2-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Brightness 2",
+            "functionID": "41",
+            "type": "BrightnessSensor",
+            "floor": "01",
+            "room": "02",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1027,
+                "value": "234"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB700000028": {
+        "displayName": "Temperature Sensor 1",
+        "deviceId": "9005",
+        "articleNumber": "6800-3-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Temperature 1",
+            "functionID": "43",
+            "type": "TemperatureSensor",
+            "floor": "01",
+            "room": "03",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 304,
+                "value": "21.5"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB700000029": {
+        "displayName": "Temperature Sensor 2",
+        "deviceId": "9005",
+        "articleNumber": "6800-3-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Temperature 2",
+            "functionID": "43",
+            "type": "TemperatureSensor",
+            "floor": "01",
+            "room": "04",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 304,
+                "value": "21.5"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB70000002A": {
+        "displayName": "4-Gang Push Button 1",
+        "deviceId": "1013",
+        "articleNumber": "6220-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Button 1.1",
+            "functionID": "18",
+            "type": "PushButtonSensor",
+            "floor": "01",
+            "room": "05",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0001": {
+            "displayName": "Button 1.2",
+            "functionID": "18",
+            "type": "PushButtonSensor",
+            "floor": "01",
+            "room": "05",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0002": {
+            "displayName": "Button 1.3",
+            "functionID": "18",
+            "type": "PushButtonSensor",
+            "floor": "01",
+            "room": "05",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0003": {
+            "displayName": "Button 1.4",
+            "functionID": "18",
+            "type": "PushButtonSensor",
+            "floor": "01",
+            "room": "05",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB70000002B": {
+        "displayName": "4-Gang Push Button 2",
+        "deviceId": "1013",
+        "articleNumber": "6220-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Button 2.1",
+            "functionID": "18",
+            "type": "PushButtonSensor",
+            "floor": "01",
+            "room": "06",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0001": {
+            "displayName": "Button 2.2",
+            "functionID": "18",
+            "type": "PushButtonSensor",
+            "floor": "01",
+            "room": "06",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0002": {
+            "displayName": "Button 2.3",
+            "functionID": "18",
+            "type": "PushButtonSensor",
+            "floor": "01",
+            "room": "06",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0003": {
+            "displayName": "Button 2.4",
+            "functionID": "18",
+            "type": "PushButtonSensor",
+            "floor": "01",
+            "room": "06",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB70000002C": {
+        "displayName": "4-Gang Push Button 3",
+        "deviceId": "1013",
+        "articleNumber": "6220-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Button 3.1",
+            "functionID": "18",
+            "type": "PushButtonSensor",
+            "floor": "01",
+            "room": "07",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0001": {
+            "displayName": "Button 3.2",
+            "functionID": "18",
+            "type": "PushButtonSensor",
+            "floor": "01",
+            "room": "07",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0002": {
+            "displayName": "Button 3.3",
+            "functionID": "18",
+            "type": "PushButtonSensor",
+            "floor": "01",
+            "room": "07",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0003": {
+            "displayName": "Button 3.4",
+            "functionID": "18",
+            "type": "PushButtonSensor",
+            "floor": "01",
+            "room": "07",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB70000002D": {
+        "displayName": "Smoke Detector 1",
+        "deviceId": "9007",
+        "articleNumber": "6810-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Smoke 1",
+            "functionID": "7D",
+            "type": "SmokeDetector",
+            "floor": "01",
+            "room": "08",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 54,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB70000002E": {
+        "displayName": "Smoke Detector 2",
+        "deviceId": "9007",
+        "articleNumber": "6810-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Smoke 2",
+            "functionID": "7D",
+            "type": "SmokeDetector",
+            "floor": "00",
+            "room": "09",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 54,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB70000002F": {
+        "displayName": "Room Temperature Controller 1",
+        "deviceId": "6053",
+        "articleNumber": "1097-2-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "RTC 1",
+            "functionID": "A",
+            "type": "RoomTemperatureController",
+            "floor": "00",
+            "room": "0A",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 51,
+                "value": "21.0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 304,
+                "value": "21.0"
+              },
+              "odp0001": {
+                "pairingID": 305,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB700000030": {
+        "displayName": "Room Temperature Controller 2",
+        "deviceId": "6053",
+        "articleNumber": "1097-2-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "RTC 2",
+            "functionID": "A",
+            "type": "RoomTemperatureController",
+            "floor": "00",
+            "room": "0B",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 51,
+                "value": "21.0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 304,
+                "value": "21.0"
+              },
+              "odp0001": {
+                "pairingID": 305,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB700000031": {
+        "displayName": "Underfloor Heating Manifold",
+        "deviceId": "1023",
+        "articleNumber": "1503-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Valve 1",
+            "functionID": "27",
+            "type": "HeatingActuator",
+            "floor": "00",
+            "room": "0C",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 48,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 48,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0001": {
+            "displayName": "Valve 2",
+            "functionID": "27",
+            "type": "HeatingActuator",
+            "floor": "00",
+            "room": "0C",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 48,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 48,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0002": {
+            "displayName": "Valve 3",
+            "functionID": "27",
+            "type": "HeatingActuator",
+            "floor": "00",
+            "room": "0C",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 48,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 48,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0003": {
+            "displayName": "Valve 4",
+            "functionID": "27",
+            "type": "HeatingActuator",
+            "floor": "00",
+            "room": "0C",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 48,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 48,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0004": {
+            "displayName": "Valve 5",
+            "functionID": "27",
+            "type": "HeatingActuator",
+            "floor": "00",
+            "room": "0C",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 48,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 48,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          },
+          "ch0005": {
+            "displayName": "Valve 6",
+            "functionID": "27",
+            "type": "HeatingActuator",
+            "floor": "00",
+            "room": "0C",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 48,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 48,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      }
+    }
+  }
+}

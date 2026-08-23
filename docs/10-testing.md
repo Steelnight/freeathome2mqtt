@@ -223,6 +223,8 @@ installation, verify every **⚠ verify empirically** marker in
 5. What is the actual concurrency threshold at which `502`s begin? (Calibrates `max_inflight`.)
 6. Does every actuator type echo its command on the WebSocket? (Sets `confirm` per profile.)
 7. Cover and slat orientation on real hardware, per actuator type.
+8. Cross-check the generated `pairings.py` (docs/01 §7) against a live `GET /api/rest/pairings` —
+   the vendored snapshot has not been verified against a real SysAP's own pairing catalogue.
 
 Each answer updates `docs/01` and adds a fixture. Until then the defaults are conservative, and the
 markers stay in the document rather than being quietly dropped.

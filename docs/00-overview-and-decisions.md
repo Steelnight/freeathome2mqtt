@@ -126,6 +126,20 @@ originate from `Busch-Jaeger/node-free-at-home` (`src/pairingIds.ts`); check its
 vendoring and prefer generating from the vendor source where the licence permits. Resolve this in
 WP0 before writing any generated file.
 
+**Resolved in WP0.** `Busch-Jaeger/node-free-at-home`'s `package.json` declares an **ISC** licence —
+permissive, MIT-compatible, requiring only retention of the copyright/permission notice. Both
+upstream sources are therefore safe to vendor generated tables from. This project is licensed
+**MIT** (see `LICENSE`), which is compatible with consuming both an MIT and an ISC source. When
+`tools/gen_codes.py` lands in WP1, it must emit `src/freeathome2mqtt/sysap/codes/NOTICE` retaining:
+
+- the `local-abbfreeathome` MIT copyright notice, for the `Pairing`/`Function`/`Parameter`/
+  `Interface` enumerations and function→behaviour knowledge extracted from it, and
+- the `Busch-Jaeger/node-free-at-home` ISC copyright notice, for any pairing ID sourced from its
+  `src/pairingIds.ts`,
+
+each attributed to its origin file. No generated file is committed before `NOTICE` exists alongside
+it.
+
 ---
 
 ### ADR-003

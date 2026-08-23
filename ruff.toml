@@ -1,0 +1,40 @@
+target-version = "py312"
+line-length = 100
+src = ["src", "tests", "tools"]
+extend-exclude = ["docs"]
+
+[lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "SIM",   # flake8-simplify
+    "G",     # flake8-logging-format — G004: no f-strings in logging calls (P-50)
+    "LOG",   # flake8-logging
+    "ASYNC", # flake8-async — blocking calls in async def
+    "S",     # flake8-bandit — S102/S307 ban exec/eval (rule 1)
+    "RUF",   # ruff-specific
+    "C90",   # mccabe complexity (rule 4)
+    "PL",    # pylint — PLR0912/PLR0915 too-many-branches/statements (rule 4)
+]
+ignore = [
+    "PLR0913", # too-many-arguments: dataclass-heavy code trips this without being a problem
+]
+
+[lint.mccabe]
+max-complexity = 10
+
+[lint.pylint]
+max-branches = 8
+max-statements = 40
+
+[lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "PLR2004"]
+"tools/**" = ["S603", "S607"]
+
+[format]
+line-ending = "lf"

@@ -10,9 +10,13 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
 **Read `docs/` before writing code.** This file governs *how* code gets written; `docs/` governs
 *what* gets built and in what order ([`docs/11-implementation-plan.md`](docs/11-implementation-plan.md)).
 
-**Current status: design phase.** No implementation exists yet. [`docs/11 WP0`](docs/11-implementation-plan.md#wp0--bootstrap)
-is the first thing to build — `pyproject.toml`, lint/type config, package skeleton, CI. Nothing
-below this line works until WP0 lands; it describes the target state.
+**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap) landed.** `pyproject.toml`,
+`ruff.toml`, strict `mypy`/`pytest` config, the full package skeleton from
+[`docs/02 §2`](docs/02-architecture.md#2-module-layout) (every module a docstring-only stub) and CI
+(lint, type, test, coverage) are in place; the licence question is resolved (MIT, see `LICENSE` and
+[ADR-002](docs/00-overview-and-decisions.md#adr-002)). No behaviour is implemented yet — every
+module below WP0 is still a stub. [`docs/11 WP1`](docs/11-implementation-plan.md#wp1--domain-codes-and-the-capture-tool)
+(domain codes and the capture tool) is next.
 
 ---
 
@@ -178,7 +182,7 @@ uv run pytest --cov                          # with coverage; must hold the floo
 uv run pytest -m bench                       # performance budgets (docs/05 §1, §8)
 uv run ruff check && uv run ruff format --check
 uv run mypy --strict src/
-uv run python tools/gen_codes.py --check     # generated code tables are still byte-identical
+uv run python -m freeathome2mqtt.tools.gen_codes --check  # generated code tables are still byte-identical
 ```
 
 ## 4. When this file and `docs/` disagree with reality

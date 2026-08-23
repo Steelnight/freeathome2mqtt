@@ -3,9 +3,11 @@
 A high-performance bridge between an **ABB / Busch-Jaeger free@home** System Access Point (SysAP)
 and **MQTT**.
 
-> **Status: design phase.** This repository currently contains the complete engineering plan.
-> No implementation code exists yet. The documents under [`docs/`](docs/) are written to be
-> executed by an implementing agent (human or AI) top to bottom.
+> **Status: bootstrap ([WP0](docs/11-implementation-plan.md#wp0--bootstrap)) landed.** The package
+> skeleton, lint/type/test tooling and CI are in place; no bridge behaviour is implemented yet. The
+> documents under [`docs/`](docs/) are written to be executed by an implementing agent (human or
+> AI) top to bottom, and [WP1](docs/11-implementation-plan.md#wp1--domain-codes-and-the-capture-tool)
+> is next.
 
 ---
 
@@ -77,6 +79,20 @@ matching, function lookup, name templating and Home Assistant payload rendering 
 into flat lookup tables during startup. The runtime hot path is a dict lookup, a string decode,
 a comparison against the cached value, and a set insertion.
 
+## Development
+
+Built and tested with [`uv`](https://docs.astral.sh/uv/). See [`CLAUDE.md`](CLAUDE.md) for the full
+TDD workflow this repository requires.
+
+```bash
+uv sync --group dev
+
+uv run pytest -m "not bench and not soak"   # fast suite
+uv run pytest --cov                          # with coverage; floors in CLAUDE.md §1
+uv run ruff check && uv run ruff format --check
+uv run mypy --strict src/
+```
+
 ## Provenance
 
 The design draws on, and deliberately diverges from, three projects:
@@ -95,5 +111,6 @@ The design draws on, and deliberately diverges from, three projects:
 
 ## License
 
-To be decided in WP0. See [ADR-002](docs/00-overview-and-decisions.md#adr-002) for the licence
-implications of vendoring generated code tables.
+[MIT](LICENSE). Decided in WP0 — see [ADR-002](docs/00-overview-and-decisions.md#adr-002) for the
+licence implications of vendoring generated code tables from `local-abbfreeathome` (MIT) and
+`Busch-Jaeger/node-free-at-home` (ISC).

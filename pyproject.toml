@@ -3,14 +3,14 @@ name = "freeathome2mqtt"
 version = "0.1.0"
 description = "A performance-focused bridge between an ABB/Busch-Jaeger free@home SysAP and MQTT."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = "==3.14.7"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "the freeathome2mqtt contributors" }]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Home Automation",
 ]
 dependencies = [
@@ -69,7 +69,7 @@ exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]
 fail_under = 90
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.14"
 strict = true
 warn_unused_configs = true
 plugins = ["pydantic.mypy"]

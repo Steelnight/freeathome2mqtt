@@ -244,8 +244,10 @@ Image requirements:
 - Multi-arch `linux/amd64`, `linux/arm64`, `linux/arm/v7` — a Pi next to the SysAP is the primary
   target, and armv7 still matters for older Pis.
 - Non-root by default; `/data` owned by the runtime user.
-- `python:3.13-slim` base. Avoid Alpine: musl has no `uvloop` wheel and no `orjson` wheel for every
-  arch, so you trade 30 MB of image for a source build and a slower runtime.
+- `python:3.14.7-slim` base, matching the pinned interpreter in
+  [`docs/00 §5`](00-overview-and-decisions.md#5-technology-stack). Avoid Alpine: musl has no
+  `uvloop` wheel and no `orjson` wheel for every arch, so you trade 30 MB of image for a source
+  build and a slower runtime.
 - `TINI` or `--init` so `SIGTERM` reaches the process and the graceful shutdown in
   [`docs/02 §8`](02-architecture.md#8-shutdown) actually runs.
 - Health check exits 0 only when `bridge/state` would be `online`.

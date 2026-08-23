@@ -208,7 +208,7 @@ Assertions at the end:
 | `pytest -m "not bench and not soak"` | Coverage floors |
 | Profile schema validation | Every YAML validates against `_schema.json` |
 | `gen_codes.py --check` | Generated files are byte-identical to committed ones (P-58) |
-| Profile coverage | ≥ 85 % of channels in `captured/*.json` match a profile |
+| Profile coverage | ≥ 85 % of channels in `captured/*.json` match a profile — **conditional**: skipped (not failed) until at least one real capture is committed, since captures require hardware (P-60) and none exists before M2. WP4 gates coverage against `typical.json` in the meantime; note that number is somewhat self-referential, as `typical.json` is authored, not captured. The gate becomes blocking the moment a `captured/*.json` lands. |
 | Docs links | Every relative link in `docs/` resolves |
 | `pytest -m bench` | Regression gate vs. baseline (main branch only) |
 | Container build | Multi-arch, plus a smoke test that the image starts and `--check-config` passes |
@@ -228,5 +228,14 @@ installation, verify every **⚠ verify empirically** marker in
 6. Does every actuator type echo its command on the WebSocket? (Sets `confirm` per profile.)
 7. Cover and slat orientation on real hardware, per actuator type.
 
-Each answer updates `docs/01` and adds a fixture. Until then the defaults are conservative, and the
-markers stay in the document rather than being quietly dropped.
+And against a real **Home Assistant** instance (WP10), verify the discovery-payload keys the plan
+could not settle offline ([`docs/04 §6.2.1`](04-mqtt-interface.md#621-state-encoding--the-wire-stays-typed-ha-bridges-it)):
+
+8. Each stateful component (`light`, `switch`, `lock`, `valve`, `cover`, `climate`) created from the
+   default-schema + value-template discovery payload actually turns on/off, dims, and reports state
+   correctly from the typed shared state topic — confirming the exact keys (`on_command_type`,
+   `state_on`/`state_off` vs. `payload_on`/`payload_off`, tilt/position keys) for the target HA
+   version.
+
+Each answer updates `docs/01` (or `docs/04 §6` for item 8) and adds a fixture. Until then the
+defaults are conservative, and the markers stay in the document rather than being quietly dropped.

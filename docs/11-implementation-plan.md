@@ -173,7 +173,8 @@ including **WS-before-config buffering**, TaskGroup with restart shim and escala
 **Deliverables** `mqtt/bridge_api.py` (all commands in [`docs/04 §5`](04-mqtt-interface.md#5-the-bridge-api)),
 `settings.py` (pydantic model, env overrides, `!env`/`!secret`/`!file`, semantic validation),
 `log.py` (redaction, rate-limited MQTT sink, `log_once`), `cli.py` (`--check-config`, `--dry-run`,
-`--discover`, `--capture`), `sysap/mdns.py`, virtual-device create + TTL keepalive.
+`--discover`, `--capture`, `--health` — the container healthcheck probe, [`docs/07 §3`](07-configuration.md#3-cli)),
+`sysap/mdns.py`, virtual-device create + TTL keepalive.
 
 **Acceptance** `test_no_secrets_in_logs_or_bridge_info`, `test_mqtt_log_sink_is_rate_limited`,
 `test_rename_clears_old_retained_topics`, `test_virtual_device_ttl_keepalive`,

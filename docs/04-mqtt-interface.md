@@ -301,9 +301,13 @@ homeassistant/<component>/<node_id>/<object_id>/config
   "unique_id": "ABB7F500E17A_ch0003",
   "object_id": "kueche_deckenlicht",
   "state_topic": "freeathome2mqtt/kueche_deckenlicht",
+  "state_value_template": "{{ 'ON' if value_json.state else 'OFF' }}",
   "command_topic": "freeathome2mqtt/kueche_deckenlicht/set",
-  "schema": "json",
-  "brightness": true,
+  "payload_on": "ON",
+  "payload_off": "OFF",
+  "brightness_state_topic": "freeathome2mqtt/kueche_deckenlicht",
+  "brightness_value_template": "{{ value_json.brightness | int(0) }}",
+  "brightness_command_topic": "freeathome2mqtt/kueche_deckenlicht/set/brightness",
   "brightness_scale": 100,
   "availability": [
     { "topic": "freeathome2mqtt/bridge/state", "value_template": "{{ value_json.state }}" },
@@ -330,6 +334,9 @@ Points that matter:
 - `unique_id` is the entity id → **renaming never creates a duplicate entity in Home Assistant.**
   This is the payoff for ADR-010's stable identity.
 - `object_id` seeds HA's initial `entity_id`, so users get `light.kueche_deckenlicht`.
+- `state_value_template`/`brightness_value_template` read the shared typed state topic and map it
+  to HA's expected form — this is the default light schema, deliberately **not** `schema: json`
+  (see §6.2.1); the state topic keeps carrying `"state": true`, not `"ON"`.
 - `device.identifiers` is the **device serial**, so all channels of a 4-gang switch land under one
   HA device.
 - `via_device` is the SysAP, so the whole installation forms a tree.
@@ -341,9 +348,9 @@ Points that matter:
 
 | Profile class | HA component | Notes |
 |---|---|---|
-| switch actuator | `switch` | `device_class: outlet` where the channel says so |
-| dimming actuator | `light` | `schema: json`, `brightness_scale: 100` |
-| colour-temperature actuator | `light` | + `color_temp`, Kelvin bounds from channel parameters |
+| switch actuator | `switch` | value template over `value_json.state`; `device_class: outlet` where the channel says so |
+| dimming actuator | `light` | default schema, `brightness_scale: 100`, value templates (§6.2.1) |
+| colour-temperature actuator | `light` | default schema + `color_temp`, Kelvin bounds from channel parameters |
 | cover actuators | `cover` | `position_topic`, `set_position_topic`; slats → `tilt_*` |
 | window/door sensor | `binary_sensor` | `device_class: window` / `door` |
 | movement detector | `binary_sensor` + `sensor` | occupancy + the brightness value it also reports |
@@ -354,6 +361,34 @@ Points that matter:
 | door opener | `lock` | |
 | switch sensor / trigger / door ring | `event` | HA's `event` platform — the right fit for edges |
 | unsupported (raw mode) | `sensor` | `entity_category: diagnostic`, disabled by default |
+
+Where "notes" say *value template*, that is the mechanism in §6.2.1 below, not the JSON light
+schema.
+
+### 6.2.1 State encoding — the wire stays typed, HA bridges it
+
+The generic MQTT contract publishes **typed JSON** (`"state": true`, `"brightness": 43`,
+`"position": 0`, `null` for unknown — [§2](#2-entity-state)). Home Assistant's own conventions
+differ per component: the `light` **JSON schema** (`schema: json`) requires the payload's `state`
+field to be the *strings* `"ON"`/`"OFF"`, and does **not** offer a template to remap a boolean.
+Emitting `"ON"`/`"OFF"` on the shared state topic would leak an HA-specific encoding into the
+documented contract, breaking openHAB/Node-RED consumers and ADR-009.
+
+The rule, therefore: **stateful actuators (light, switch, lock, valve, cover, climate) use HA's
+default/template schema, not `schema: json`**, and bridge the typed payload with value templates
+over the *same* shared state topic — e.g. `state_value_template: "{{ 'ON' if value_json.state
+else 'OFF' }}"`, `brightness_value_template: "{{ value_json.brightness | int(0) }}"`,
+`position_template: "{{ value_json.position }}"`. `binary_sensor`, `sensor` and `event` already
+read `value_json.<attr>` this way. The boolean↔`ON`/`OFF` (and percent, and enum) mapping thus
+lives **entirely in the `homeassistant/` layer**, exactly where ADR-009 puts HA-specific concerns,
+and the wire never carries an HA-ism.
+
+> **⚠ verify against a real HA instance (WP10).** The *rule* above (typed wire, templates in
+> discovery, no JSON light schema) is settled. The *exact* discovery keys per component —
+> `on_command_type`, whether `switch` uses `value_template`+`state_on`/`state_off` vs.
+> `payload_on`/`payload_off`, `brightness` behaviour when `state` is off, tilt/position keys for
+> covers — must be confirmed against the running HA version before 1.0, because HA changes MQTT
+> discovery keys between releases and the plan should not hardcode unverified ones.
 
 ### 6.3 Lifecycle
 

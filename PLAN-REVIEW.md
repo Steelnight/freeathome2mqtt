@@ -9,15 +9,24 @@ directly. None of these block the plan; they should be resolved before the WP th
 Severity: **[A]** substantive contradiction (numbers/types that cannot all be true) ·
 **[B]** gap / underspecified (referenced but never defined) · **[C]** nit / wording.
 
-**Resolution status.** ✅ **Resolved in the plan:** A1, A2, A3, A4, B1, B2, C1–C7.
-⬜ **Still open (fold in later):** B3, B4, B5.
+**Resolution status.** ✅ **Resolved in the plan:** A1–A4, B1–B5, C1–C7 (all findings).
 
-Decisions taken on the three that needed a design call:
+Decisions taken on the ones that needed a design call:
 - **A1** — command throttling is a leading-edge + per-window throttle (not a quiescence-reset
   debounce); default window raised 50 ms → **350 ms** so P5 (≤ 6 writes/2 s) holds, the ≤ 10/s
   sustained-write cap is respected, and intermediate drag values are never dropped.
 - **B1** — added an explicit `primary:` profile key (defaults to the first-declared command).
 - **B2** — added a declarative `on_zero:` command hook so "brightness 0 = off" needs no transform.
+- **B3** — added the `--health` CLI flag (probe the running bridge's retained `bridge/state` over
+  MQTT; used by the container healthcheck) to `docs/07 §3` and WP9.
+- **B4** — settled the rule: the wire stays **typed** (`state: true`), and HA lights/switches use
+  the **default** schema with value templates (not `schema: json`, which would force `"ON"/"OFF"`
+  onto the shared topic and break ADR-009). Rewrote the `docs/04 §6.1` example and added §6.2.1.
+  ⚠ The *exact per-component discovery keys* are marked for validation on a real HA instance
+  (WP10) — I could not fetch the HA MQTT docs to confirm them (egress to home-assistant.io is
+  blocked by this environment's network policy), and the plan should not hardcode unverified keys.
+- **B5** — the `captured/*.json` coverage CI gate is now **conditional** (skipped until ≥ 1 real
+  capture exists), with WP4 gating against `typical.json` in the meantime.
 
 ---
 

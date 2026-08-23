@@ -157,7 +157,7 @@ nightmare.
 
 ```
 freeathome2mqtt [--config PATH] [--data-dir PATH] [--log-level LEVEL]
-                [--check-config] [--dry-run] [--discover] [--capture PATH]
+                [--check-config] [--dry-run] [--discover] [--capture PATH] [--health]
 ```
 
 | Flag | Purpose |
@@ -166,6 +166,7 @@ freeathome2mqtt [--config PATH] [--data-dir PATH] [--log-level LEVEL]
 | `--dry-run` | Full startup — connect, fetch, compile — then print the entity table and exit **without publishing anything.** The single most useful flag for a new user: it answers "what will this create?" before it creates it. |
 | `--discover` | mDNS-scan for SysAPs (`_http._tcp.local.`, name `free@home*`) and print candidates |
 | `--capture PATH` | Record the live configuration and a WebSocket session into a test fixture ([`docs/10 §3`](10-testing.md#3-fixtures-and-the-fake-sysap)), with serials and names pseudonymised |
+| `--health` | **Probe, not a second bridge.** Connect to the broker using the config's MQTT settings, read the retained `<base>/bridge/state`, and exit `0` iff it is `{"state":"online"}`, else non-zero. Used by the container healthcheck ([§5.1](#51-container)). It does **not** touch the SysAP or publish anything, and must complete well inside the compose `timeout` (default 5 s) — it uses a short connect deadline (`min(request_timeout, 3 s)`) and exits non-zero on timeout. This reports the health of the *already-running* bridge as that bridge sees it (via its own retained state), so it stays correct when the SysAP link is down but MQTT is up — exactly the case a naive MQTT-only check gets wrong ([ADR-008](00-overview-and-decisions.md#adr-008)). |
 
 `--capture` is what turns a user's bug report into a regression test, and pseudonymisation is what
 makes them willing to send it.

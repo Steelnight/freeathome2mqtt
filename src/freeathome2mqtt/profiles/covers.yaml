@@ -1,0 +1,79 @@
+# Tier-1 cover profiles (docs/03 §9): shutter/blind/awning/attic-window actuator, plain and with
+# slats. See docs/01 §6.1 and P-07 for the position-inversion convention this bridge publishes.
+
+- id: cover_actuator
+  description: A shutter, blind, awning, or attic-window actuator without adjustable slats.
+  functions:
+    - FID_SHUTTER_ACTUATOR
+    - FID_BLIND_ACTUATOR
+    - FID_ATTIC_WINDOW_ACTUATOR
+    - FID_AWNING_ACTUATOR
+  requires:
+    outputs: [AL_CURRENT_ABSOLUTE_POSITION_BLINDS_PERCENTAGE]
+
+  attributes:
+    # docs/01 §6.1, P-07: free@home 0 = open, 100 = closed -- the bridge's own convention is the
+    # opposite (matching Home Assistant and ordinary intuition). percent_inverted does that
+    # inversion once, at this boundary; the raw orientation never reaches an MQTT payload.
+    position:
+      pairing: AL_CURRENT_ABSOLUTE_POSITION_BLINDS_PERCENTAGE
+      codec: percent_inverted
+      kind: state
+      unit: "%"
+
+  commands:
+    position:
+      pairing: AL_SET_ABSOLUTE_POSITION_BLINDS_PERCENTAGE
+      codec: percent_inverted
+      continuous: true
+      optimistic: position
+    # Optional: not every cover exposes an explicit stop, and this bridge cannot tell a moving
+    # cover from a stationary one from the config snapshot alone.
+    stop:
+      pairing: AL_STOP_STEP_UP_DOWN
+      codec: bool01
+
+- id: cover_with_slats
+  description: A blind actuator with an independently adjustable slat angle.
+  functions:
+    - FID_BLIND_ACTUATOR
+    - FID_SHUTTER_ACTUATOR
+  requires:
+    outputs:
+      [
+        AL_CURRENT_ABSOLUTE_POSITION_BLINDS_PERCENTAGE,
+        AL_CURRENT_ABSOLUTE_POSITION_SLATS_PERCENTAGE,
+      ]
+  # docs/03 §7: position and slat angle interact, and opening fully leaves the slat angle
+  # meaningless -- see model/transforms.py's CoverWithSlatsTransform.
+  transform: cover_with_slats
+
+  attributes:
+    position:
+      pairing: AL_CURRENT_ABSOLUTE_POSITION_BLINDS_PERCENTAGE
+      codec: percent_inverted
+      kind: state
+      unit: "%"
+    # ⚠ Slat orientation is not documented and may not follow the same open/closed convention as
+    # position (docs/01 §6.1's own caveat) -- left un-inverted until verified against real
+    # hardware, rather than guessing an inversion that could be backwards.
+    slat_position:
+      pairing: AL_CURRENT_ABSOLUTE_POSITION_SLATS_PERCENTAGE
+      codec: percent_int
+      kind: state
+      unit: "%"
+
+  commands:
+    position:
+      pairing: AL_SET_ABSOLUTE_POSITION_BLINDS_PERCENTAGE
+      codec: percent_inverted
+      continuous: true
+      optimistic: position
+    slat_position:
+      pairing: AL_SET_ABSOLUTE_POSITION_SLATS_PERCENTAGE
+      codec: percent_int
+      continuous: true
+      optimistic: slat_position
+    stop:
+      pairing: AL_STOP_STEP_UP_DOWN
+      codec: bool01

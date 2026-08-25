@@ -348,9 +348,16 @@ function in `model/transforms.py`:
 class RoomTemperatureControllerTransform(Transform):
     def derive(self, values: list[Any]) -> dict[str, Any]:
         """Derive composite attributes from raw ones after any change."""
-    def command(self, name: str, value: Any, values: list[Any]) -> list[tuple[str, str]]:
-        """Return (rest_path, raw_value) writes for one logical command."""
+    def command(self, name: str, value: Any, values: list[Any]) -> list[tuple[str, Any]]:
+        """Return (sub_command_name, symbolic_value) writes for one logical command."""
 ```
+
+`command()` returns the *profile's own command names* and each command's own *symbolic*
+(pre-encode) value, not REST paths or raw wire strings: a transform is a pure function with no
+compile-time knowledge of a specific entity's compiled paths or codec encodings, so it cannot
+fabricate either. The caller (`bus/commands.py`, WP7) resolves each `sub_command_name` to that
+entity's compiled `EgressBinding` and calls its `encode()`, exactly as it would for a
+non-transformed command.
 
 The full expected list — do not grow it without justification:
 

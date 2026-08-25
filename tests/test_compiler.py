@@ -506,6 +506,106 @@ def test_compile_dimming_profile_exercises_enum_range_and_precision_codecs() -> 
     assert model.egress[(0, "brightness")].validate(0) == 1
 
 
+# --------------------------------------------------------------- color_temp_pct channel parameters
+
+
+def _color_temp_profile(**overrides: Any) -> dict[str, Any]:
+    profile: dict[str, Any] = {
+        "id": "colour_temperature_actuator",
+        "functions": ["FID_DIMMING_ACTUATOR"],
+        "attributes": {
+            "color_temp": {"pairing": "AL_INFO_COLOR_TEMPERATURE", "codec": "color_temp_pct"},
+        },
+        "commands": {
+            "color_temp": {"pairing": "AL_COLOR_TEMPERATURE", "codec": "color_temp_pct"},
+        },
+        "parameters": {
+            "color_temp_warmest": "PID_TEMPERATURE_COLOR_PHYSICAL_WARMEST",
+            "color_temp_coolest": "PID_TEMPERATURE_COLOR_PHYSICAL_COOLEST",
+        },
+    }
+    profile.update(overrides)
+    return profile
+
+
+def _color_temp_channel(**overrides: Any) -> dict[str, Any]:
+    channel: dict[str, Any] = {
+        "displayName": "Deckenlicht",
+        "functionID": "12",  # hex for FID_DIMMING_ACTUATOR = 18
+        "floor": "01",
+        "room": "0C",
+        "inputs": {"idp0000": {"pairingID": 22, "value": "50"}},  # AL_COLOR_TEMPERATURE
+        "outputs": {"odp0000": {"pairingID": 280, "value": "50"}},  # AL_INFO_COLOR_TEMPERATURE
+        "parameters": {"par00f6": "2700", "par00f5": "6500"},  # WARMEST=0xf6, COOLEST=0xf5
+    }
+    channel.update(overrides)
+    return channel
+
+
+def test_color_temp_uses_channel_parameters() -> None:
+    # P-09's named test: never hardcode 2700-6500K -- these channel parameters (2000/4000) are
+    # deliberately different from the common defaults, so a hardcoded-bounds bug would fail this.
+    registry = build_registry([parse_profile(_color_temp_profile(), source="<test>")])
+    channel = _color_temp_channel(parameters={"par00f6": "2000", "par00f5": "4000"})
+    config = _config({"ABB700990099": _device({"ch0000": channel})})
+    model = compile(config, registry, CompileOptions())
+
+    assert len(model.entities) == 1
+    assert model.initial_values[0][0] == 3000  # 50% between 2000 and 4000
+    assert model.egress[(0, "color_temp")].encode(2000) == "0"
+    assert model.egress[(0, "color_temp")].encode(4000) == "100"
+
+
+def test_color_temp_pct_channel_parameter_key_case_and_width_are_tolerant() -> None:
+    # Real installations may not zero-pad or lowercase parameter keys identically; the lookup
+    # matches by parsed hex value, not by exact key string.
+    registry = build_registry([parse_profile(_color_temp_profile(), source="<test>")])
+    channel = _color_temp_channel(parameters={"PAR00F6": "2700", "par0F5": "6500"})
+    config = _config({"ABB700990099": _device({"ch0000": channel})})
+    model = compile(config, registry, CompileOptions())
+    assert model.initial_values[0][0] == 4600  # 50% between 2700 and 6500
+
+
+def test_compiler_rejects_color_temp_pct_without_declared_parameters() -> None:
+    # A profile-authoring bug (static -- would fail identically for every channel), not a
+    # per-installation quirk: fail loudly at compile time, not silently at runtime.
+    bad_profile = _color_temp_profile(parameters={})
+    registry = build_registry([parse_profile(bad_profile, source="<test>")])
+    config = _config({"ABB700990099": _device({"ch0000": _color_temp_channel()})})
+    with pytest.raises(CompileError, match="color_temp_pct"):
+        compile(config, registry, CompileOptions())
+
+
+def test_compile_color_temp_pct_missing_channel_parameter_drops_the_attribute() -> None:
+    # The profile correctly declares which parameters to use; this specific channel just doesn't
+    # have them set -- not a static bug, so the attribute is dropped rather than crashing the
+    # whole compile (same policy as an absent, non-required datapoint).
+    profile = _color_temp_profile()
+    profile["attributes"]["state"] = {"pairing": "AL_INFO_ON_OFF", "codec": "bool01"}
+    registry = build_registry([parse_profile(profile, source="<test>")])
+    channel = _color_temp_channel(parameters={})
+    channel["outputs"]["odp0001"] = {"pairingID": 256, "value": "1"}  # AL_INFO_ON_OFF
+    config = _config({"ABB700990099": _device({"ch0000": channel})})
+    model = compile(config, registry, CompileOptions())
+
+    assert len(model.entities) == 1
+    assert model.entities[0].attr_names == ("state",)
+    assert (0, "color_temp") not in model.egress
+
+
+def test_compile_ignores_a_malformed_parameter_key() -> None:
+    # A channel parameter key that isn't valid hex (garbled, like the functionID case P-06 also
+    # guards against) is skipped, not treated as a crash or a false match. Uppercase-prefixed so
+    # it sorts before the real "par00f5"/"par00f6" keys and is actually visited first.
+    registry = build_registry([parse_profile(_color_temp_profile(), source="<test>")])
+    channel = _color_temp_channel(
+        parameters={"PARZZZZ": "9999", "par00f6": "2700", "par00f5": "6500"}
+    )
+    config = _config({"ABB700990099": _device({"ch0000": channel})})
+    model = compile(config, registry, CompileOptions())
+    assert model.initial_values[0][0] == 4600  # unaffected by the garbled key
+
+
 # -------------------------------------------------------------------------- profile matching (§3.4)
 
 

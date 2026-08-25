@@ -1,0 +1,121 @@
+# Tier-1 lighting profiles (docs/03 §9): switch, dimming, and colour-temperature actuators.
+# See docs/03 §3 for the profile format and docs/01 §6 for the protocol semantics referenced below.
+
+- id: switch_actuator
+  description: A simple on/off actuator.
+  functions:
+    - FID_SWITCH_ACTUATOR
+
+  attributes:
+    state:
+      pairing: AL_INFO_ON_OFF
+      codec: bool01
+      kind: state
+
+  commands:
+    state:
+      pairing: AL_SWITCH_ON_OFF
+      codec: bool01
+      optimistic: state
+
+- id: dimming_actuator
+  description: A dimmable light actuator.
+  functions:
+    - FID_DIMMING_ACTUATOR
+  requires:
+    outputs: [AL_INFO_ON_OFF, AL_INFO_ACTUAL_DIMMING_VALUE]
+
+  attributes:
+    state:
+      pairing: AL_INFO_ON_OFF
+      codec: bool01
+      kind: state
+    brightness:
+      pairing: AL_INFO_ACTUAL_DIMMING_VALUE
+      codec: percent_int
+      kind: state
+      unit: "%"
+    # AL_FORCED/AL_INFO_FORCE (docs/01 §6.4, P-03): a priority override several actuator types
+    # expose. Optional -- not every dimming_actuator channel has it.
+    forced_position:
+      pairing: AL_INFO_FORCE
+      codec: enum
+      kind: state
+      values: { "0": deactivated, "4": forced_on, "5": forced_off }
+      default: unknown
+      entity_category: diagnostic
+
+  commands:
+    state:
+      pairing: AL_SWITCH_ON_OFF
+      codec: bool01
+      optimistic: state
+    # docs/01 §6.3, P-08: AL_ABSOLUTE_SET_VALUE_CONTROL accepts 1..100 only -- 0 is not "off";
+    # range clamps a stray 0 (or anything else out of bounds) rather than sending an invalid write.
+    brightness:
+      pairing: AL_ABSOLUTE_SET_VALUE_CONTROL
+      codec: percent_int
+      range: [1, 100]
+      continuous: true
+      optimistic: brightness
+    # ASYMMETRIC vs the attribute's map above (docs/01 §6.4, P-03): AL_FORCED writes 2/3, but
+    # AL_INFO_FORCE reads 4/5. Never derive one map from the other.
+    forced_position:
+      pairing: AL_FORCED
+      codec: enum
+      values: { deactivated: "0", forced_on: "3", forced_off: "2" }
+      optimistic: forced_position
+
+- id: colour_temperature_actuator
+  description: A tunable-white / colour-temperature dimming actuator.
+  # Real DALI DT8 colour-temperature hardware uses its own function; a plain dimming actuator can
+  # also expose colour temperature. `requires` (below) is what actually discriminates this profile
+  # from `dimming_actuator` for the shared function -- most-specific-wins (docs/03 §3.4) picks this
+  # one whenever AL_INFO_COLOR_TEMPERATURE is present, and plain dimmers fall through to the other.
+  functions:
+    - FID_DALI_DT8_CT_ACTUATOR
+    - FID_DIMMING_ACTUATOR
+  requires:
+    outputs: [AL_INFO_ON_OFF, AL_INFO_ACTUAL_DIMMING_VALUE, AL_INFO_COLOR_TEMPERATURE]
+
+  attributes:
+    state:
+      pairing: AL_INFO_ON_OFF
+      codec: bool01
+      kind: state
+    brightness:
+      pairing: AL_INFO_ACTUAL_DIMMING_VALUE
+      codec: percent_int
+      kind: state
+      unit: "%"
+    # docs/01 §6.2, P-09: free@home is a 0..100 percentage (0 = warmest), never Kelvin on the
+    # wire. color_temp_pct is bound per entity from THIS channel's own physical bounds below --
+    # never hardcoded 2700-6500K.
+    color_temp:
+      pairing: AL_INFO_COLOR_TEMPERATURE
+      codec: color_temp_pct
+      kind: state
+      unit: K
+
+  commands:
+    state:
+      pairing: AL_SWITCH_ON_OFF
+      codec: bool01
+      optimistic: state
+    brightness:
+      pairing: AL_ABSOLUTE_SET_VALUE_CONTROL
+      codec: percent_int
+      range: [1, 100]
+      continuous: true
+      optimistic: brightness
+    color_temp:
+      pairing: AL_COLOR_TEMPERATURE
+      codec: color_temp_pct
+      continuous: true
+      optimistic: color_temp
+
+  # Read once at compile time from the channel's own parameters and bound into the color_temp_pct
+  # codec (docs/03 §5, P-09) -- see model/compiler.py's color_temp_pct special case.
+  parameters:
+    color_temp_warmest: PID_TEMPERATURE_COLOR_PHYSICAL_WARMEST
+    color_temp_coolest: PID_TEMPERATURE_COLOR_PHYSICAL_COOLEST

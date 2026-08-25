@@ -26,7 +26,7 @@ from freeathome2mqtt.model.entity import (
 )
 from freeathome2mqtt.model.naming import SlugCandidate, resolve_slugs, slugify
 from freeathome2mqtt.model.profiles import Profile, ProfileRegistry
-from freeathome2mqtt.sysap.codes import Function, Pairing
+from freeathome2mqtt.sysap.codes import Function, Pairing, Parameter
 from freeathome2mqtt.sysap.schema import Channel, Configuration, Device, InOutPut, parse_function_id
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,10 @@ _VIRTUAL_DEVICE_SERIAL_PREFIX = "6000"
 _CIRCLED_ALPHANUMERIC_MIN = 0x2460
 _CIRCLED_ALPHANUMERIC_MAX = 0x24FF
 _PRECISION_AWARE_CODECS = frozenset({"float", "scaled"})
+# docs/03 §5, P-09: color_temp_pct is bound per entity from the CHANNEL's own physical bounds, not
+# the profile's codec_params -- a profile using it must name these two entries in `parameters:`.
+_COLOR_TEMP_WARMEST_PARAM_NAME = "color_temp_warmest"
+_COLOR_TEMP_COOLEST_PARAM_NAME = "color_temp_coolest"
 
 
 class CompileError(Exception):
@@ -240,6 +244,20 @@ def _find_datapoint_key(datapoints: Mapping[str, InOutPut], pairing: Pairing) ->
     return None
 
 
+def _find_parameter_value(parameters: Mapping[str, str], parameter: Parameter) -> str | None:
+    # Keys are "parNNNN" (docs/01 §4.3), but matched by parsed hex value rather than an exact
+    # "par" + zero-padded-hex string, so this tolerates whatever case/width a real SysAP sends.
+    for key in sorted(parameters):
+        suffix = key.removeprefix("par").removeprefix("PAR")
+        try:
+            parsed = int(suffix, 16)
+        except ValueError:
+            continue
+        if parsed == parameter.value:
+            return parameters[key]
+    return None
+
+
 def _has_all_pairings(datapoints: Mapping[str, InOutPut], pairings: tuple[Pairing, ...]) -> bool:
     present = {dp.get("pairingID") for dp in datapoints.values()}
     return all(pairing.value in present for pairing in pairings)
@@ -366,20 +384,52 @@ def _resolve_names_and_slugs(
 # ---------------------------------------------------------------------------- pass 2: codecs (§5)
 
 
-def _build_attribute_codec(spec: AttributeSpec) -> Codec:
+def _resolve_color_temp_bounds(compiled: _CompiledChannel) -> tuple[float, float] | None:
+    """Read the channel's own physical warmest/coolest bounds for `color_temp_pct` (P-09) --
+    never hardcode 2700-6500K. A profile that forgot to name the two parameter entries is a static
+    authoring bug (every channel using it would fail identically) and raises; a specific channel
+    that just doesn't have the values set is not -- `None` lets the caller drop that one attribute
+    or command, the same policy as any other absent, non-required datapoint.
+    """
+    warmest_param = compiled.profile.parameters.get(_COLOR_TEMP_WARMEST_PARAM_NAME)
+    coolest_param = compiled.profile.parameters.get(_COLOR_TEMP_COOLEST_PARAM_NAME)
+    if warmest_param is None or coolest_param is None:
+        raise CompileError(
+            f"{compiled.profile.id}: codec color_temp_pct needs '{_COLOR_TEMP_WARMEST_PARAM_NAME}' "
+            f"and '{_COLOR_TEMP_COOLEST_PARAM_NAME}' entries in the profile's parameters: section"
+        )
+    parameters = compiled.channel.get("parameters", {})
+    warmest_raw = _find_parameter_value(parameters, warmest_param)
+    coolest_raw = _find_parameter_value(parameters, coolest_param)
+    if warmest_raw is None or coolest_raw is None:
+        return None
+    return float(warmest_raw), float(coolest_raw)
+
+
+def _build_attribute_codec(spec: AttributeSpec, compiled: _CompiledChannel) -> Codec | None:
     if spec.codec == "enum":
         return build_codec(
             "enum", decode_values=spec.values or {}, encode_values={}, default=spec.default
         )
+    if spec.codec == "color_temp_pct":
+        bounds = _resolve_color_temp_bounds(compiled)
+        if bounds is None:
+            return None
+        return build_codec("color_temp_pct", warmest_kelvin=bounds[0], coolest_kelvin=bounds[1])
     params = dict(spec.codec_params)
     if spec.precision is not None and spec.codec in _PRECISION_AWARE_CODECS:
         params["precision"] = spec.precision
     return build_codec(spec.codec, **params)
 
 
-def _build_command_codec(spec: CommandSpec) -> Codec:
+def _build_command_codec(spec: CommandSpec, compiled: _CompiledChannel) -> Codec | None:
     if spec.codec == "enum":
         return build_codec("enum", decode_values={}, encode_values=spec.values or {})
+    if spec.codec == "color_temp_pct":
+        bounds = _resolve_color_temp_bounds(compiled)
+        if bounds is None:
+            return None
+        return build_codec("color_temp_pct", warmest_kelvin=bounds[0], coolest_kelvin=bounds[1])
     return build_codec(spec.codec, **spec.codec_params)
 
 
@@ -451,8 +501,17 @@ def _build_attributes(compiled: _CompiledChannel, entity_idx: int) -> _Attribute
             )
             continue
 
+        codec = _build_attribute_codec(spec, compiled)
+        if codec is None:
+            logger.warning(
+                "%s: attribute %r (%s) dropped -- codec parameters unavailable on this channel",
+                compiled.entity_id,
+                attr_name,
+                spec.codec,
+            )
+            continue
+
         attr_idx = len(names)
-        codec = _build_attribute_codec(spec)
         names.append(attr_name)
         kinds.append(int(spec.kind))
         bindings[f"{compiled.device_serial}/{compiled.channel_id}/{key}"] = Binding(
@@ -478,7 +537,16 @@ def _build_commands(
             _check_not_required(compiled, spec.pairing, compiled.profile.requires_inputs, cmd_name)
             continue
 
-        codec = _build_command_codec(spec)
+        codec = _build_command_codec(spec, compiled)
+        if codec is None:
+            logger.warning(
+                "%s: command %r (%s) dropped -- codec parameters unavailable on this channel",
+                compiled.entity_id,
+                cmd_name,
+                spec.codec,
+            )
+            continue
+
         # A typo'd `optimistic:` is a minor, non-critical loss (no instant UI feedback for that
         # command) rather than a P-01/P-02-grade correctness bug, so it degrades to None instead
         # of raising.

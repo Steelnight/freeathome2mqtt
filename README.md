@@ -3,17 +3,19 @@
 A high-performance bridge between an **ABB / Busch-Jaeger free@home** System Access Point (SysAP)
 and **MQTT**.
 
-> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP3](docs/11-implementation-plan.md#wp3--model-and-compiler)
+> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP4](docs/11-implementation-plan.md#wp4--tier-1-profiles)
 > landed.** Bootstrap tooling, the generated pairing/function/parameter/interface code tables, the
 > SysAP settings pre-flight, the capture tool's pseudonymisation, the `minimal`/`typical`/`nasty`
 > configuration fixtures, a real SysAP client (`RestClient`, `WsReader` against a from-scratch fake
-> SysAP), and now the domain model — the codec registry, slugify + deterministic collision
-> resolution, the `Entity`/`Binding`/`EgressBinding` runtime shapes, a JSON-Schema-validated
-> profile loader, and the pure `compile()` that turns a config snapshot + profiles into flat,
-> byte-identical-on-every-restart lookup tables — are all in place. No MQTT connectivity or actual
-> channel profiles exist yet (profiles are WP4). The documents under [`docs/`](docs/) are written
+> SysAP), the domain model (codecs, slugify + deterministic collision resolution, the
+> `Entity`/`Binding`/`EgressBinding` runtime shapes, a JSON-Schema-validated profile loader, and the
+> pure `compile()`), and now a real tier-1 profile set — 13 profiles covering switches, dimmers,
+> colour-temperature lighting, covers (plain and slatted), climate, and the common sensor types,
+> each with a round-trip fixture, plus the `room_temperature_controller`/`cover_with_slats`
+> transforms — are all in place. 100% of the `typical.json` fixture's channels match a profile
+> (floor: 85%). No MQTT connectivity exists yet. The documents under [`docs/`](docs/) are written
 > to be executed by an implementing agent (human or AI) top to bottom, and
-> [WP4](docs/11-implementation-plan.md#wp4--tier-1-profiles) (tier-1 profiles) is next.
+> [WP5](docs/11-implementation-plan.md#wp5--mqtt-layer) (the MQTT layer) is next.
 
 ---
 

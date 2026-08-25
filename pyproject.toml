@@ -40,6 +40,8 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "testcontainers>=4.7",
+    "types-jsonschema>=4.20",
+    "types-PyYAML>=6.0",
 ]
 
 [build-system]

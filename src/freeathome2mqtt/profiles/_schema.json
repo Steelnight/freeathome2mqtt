@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/steelnight/freeathome2mqtt/profiles/_schema.json",
+  "title": "freeathome2mqtt channel profile",
+  "description": "One channel type (docs/03-model-and-profiles.md §3). A profile *file* is a YAML list of these objects; each list element is validated against this schema individually.",
+  "type": "object",
+  "required": ["id", "functions", "attributes"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Profile identifier; also the merge key and the value published as `profile`.",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "description": {
+      "type": "string"
+    },
+    "functions": {
+      "type": "array",
+      "description": "Which functionIDs (sysap.codes.Function member names) this profile claims.",
+      "minItems": 1,
+      "items": { "type": "string" }
+    },
+    "requires": {
+      "type": "object",
+      "description": "Discriminator when several profiles claim the same function.",
+      "additionalProperties": false,
+      "properties": {
+        "outputs": { "type": "array", "items": { "type": "string" } },
+        "inputs": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "attributes": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/attribute" }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/command" }
+    },
+    "parameters": {
+      "type": "object",
+      "description": "Attribute name -> Parameter (sysap.codes.Parameter member name) read once at compile time and attached to the entity.",
+      "additionalProperties": { "type": "string" }
+    },
+    "homeassistant": {
+      "type": "object",
+      "description": "Component mapping; see docs/04-mqtt-interface.md §6."
+    },
+    "transform": {
+      "type": "string",
+      "description": "Named escape hatch in model/transforms.py; see docs/03 §7."
+    },
+    "availability": {
+      "type": "string",
+      "enum": ["device", "none"],
+      "default": "device"
+    }
+  },
+  "$defs": {
+    "attribute": {
+      "type": "object",
+      "description": "attributes.<name> (docs/03 §3.2). Any key beyond the ones listed here is a codec-specific construction parameter, passed to model.codecs.build_codec verbatim (e.g. `scaled`'s `factor`/`offset`) -- deliberately not enumerated since the set is open-ended over the codec registry.",
+      "required": ["pairing", "codec"],
+      "properties": {
+        "pairing": {
+          "type": "string",
+          "description": "Output pairing (sysap.codes.Pairing member name) to bind to."
+        },
+        "codec": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["state", "event"],
+          "default": "state"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "values": {
+          "type": "object",
+          "description": "Raw string -> symbolic name. Only meaningful for codec: enum.",
+          "additionalProperties": { "type": "string" }
+        },
+        "default": {
+          "description": "Value when the datapoint is \"\" or unmapped. Prefer null."
+        },
+        "entity_category": {
+          "type": "string",
+          "enum": ["diagnostic", "config"]
+        },
+        "precision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "command": {
+      "type": "object",
+      "description": "commands.<name> (docs/03 §3.3). Same open-ended codec_params note as #/$defs/attribute applies.",
+      "required": ["pairing", "codec"],
+      "properties": {
+        "pairing": {
+          "type": "string",
+          "description": "Input pairing (sysap.codes.Pairing member name) to write."
+        },
+        "codec": {
+          "type": "string",
+          "minLength": 1
+        },
+        "values": {
+          "type": "object",
+          "description": "Symbolic name -> raw string. The *inverse* direction of the attribute's map (P-03) -- never derive one from the other.",
+          "additionalProperties": { "type": "string" }
+        },
+        "range": {
+          "type": "array",
+          "description": "[min, max], clamped.",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "number" }
+        },
+        "continuous": {
+          "type": "boolean",
+          "default": false
+        },
+        "optimistic": {
+          "type": "string",
+          "description": "Attribute name to update optimistically; omit to disable optimism for this command."
+        },
+        "confirm": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    }
+  }
+}

@@ -3,15 +3,17 @@
 A high-performance bridge between an **ABB / Busch-Jaeger free@home** System Access Point (SysAP)
 and **MQTT**.
 
-> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP2](docs/11-implementation-plan.md#wp2--sysap-client)
+> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP3](docs/11-implementation-plan.md#wp3--model-and-compiler)
 > landed.** Bootstrap tooling, the generated pairing/function/parameter/interface code tables, the
 > SysAP settings pre-flight, the capture tool's pseudonymisation, the `minimal`/`typical`/`nasty`
-> configuration fixtures, and now a real SysAP client — `RestClient` (typed errors, adaptive
-> concurrency, full-jitter backoff) and `WsReader` (heartbeat, idle watchdog, reconnect, startup
-> buffering) against a from-scratch fake SysAP — are all in place. No MQTT connectivity or domain
-> model exists yet. The documents under [`docs/`](docs/) are written to be executed by an
-> implementing agent (human or AI) top to bottom, and
-> [WP3](docs/11-implementation-plan.md#wp3--model-and-compiler) (the model and compiler) is next.
+> configuration fixtures, a real SysAP client (`RestClient`, `WsReader` against a from-scratch fake
+> SysAP), and now the domain model — the codec registry, slugify + deterministic collision
+> resolution, the `Entity`/`Binding`/`EgressBinding` runtime shapes, a JSON-Schema-validated
+> profile loader, and the pure `compile()` that turns a config snapshot + profiles into flat,
+> byte-identical-on-every-restart lookup tables — are all in place. No MQTT connectivity or actual
+> channel profiles exist yet (profiles are WP4). The documents under [`docs/`](docs/) are written
+> to be executed by an implementing agent (human or AI) top to bottom, and
+> [WP4](docs/11-implementation-plan.md#wp4--tier-1-profiles) (tier-1 profiles) is next.
 
 ---
 

@@ -206,6 +206,7 @@ forking.
 | `default` | no | Value when the datapoint is `""` or unmapped. Prefer `null`. |
 | `entity_category` | no | `diagnostic` / `config`; passed to HA |
 | `precision` | no | Decimal places for float codecs; used for change detection too |
+| *(any other key)* | no | Passed to the codec factory verbatim as a keyword argument — e.g. `scaled`'s `factor`/`offset` (§5). Not enumerated here because the set is open-ended over the codec registry; `model/entity.py`'s `AttributeSpec.codec_params` holds these unmodified. |
 
 ### 3.3 Command object
 
@@ -218,6 +219,7 @@ forking.
 | `continuous` | no, default `false` | Debounce this command |
 | `optimistic` | no | Attribute name to update optimistically; omit to disable optimism for this command |
 | `confirm` | no, default `true` | Whether to expect a WS echo and reconcile if absent |
+| *(any other key)* | no | Passed to the codec factory verbatim, as for the attribute object above — `CommandSpec.codec_params` in `model/entity.py`. |
 
 ### 3.4 Profile matching
 
@@ -246,12 +248,17 @@ Channels with no matching profile are published in `bridge/devices` with
 `model/compiler.py`, pure function:
 
 ```python
-def compile(config: dict, profiles: ProfileRegistry, options: CompileOptions) -> Model
+def compile(config: Configuration, profiles: ProfileRegistry, options: CompileOptions) -> Model
 ```
+
+`config` is already unwrapped from its SysAP-UUID key (`sysap.schema.Configuration`, docs/01 §4)
+— that unwrap happens once, in `sysap.rest.RestClient` (docs/01 §3), not here. Repeating it on
+every recompile would defeat the "resolve once, cache for the process's life" rule that section
+states.
 
 Steps:
 
-1. Resolve the SysAP UUID and the floorplan into `{floor_id: {name, rooms: {room_id: name}}}`.
+1. Resolve the floorplan into `{floor_id: {room_id: name}}`.
 2. For each device: apply the interface filter; record `unresponsive`/`defect` for availability.
 3. For each channel: resolve floor/room (channel first, then device); apply the orphan filter;
    match a profile (§3.4).
@@ -263,7 +270,10 @@ Steps:
 7. Seed `values` from the datapoints' current `value` fields — the snapshot already has them, so no
    extra request is needed.
 8. Pre-render Home Assistant discovery payloads and `orjson.dumps` them once.
-9. Emit `Model(entities, ingress, egress, by_id, by_topic, discovery, stats)`.
+9. Emit `Model(entities, ingress, egress, by_id, by_topic, discovery, initial_values, stats)` —
+   `initial_values` is step 7's output: a tuple parallel to `entities`, each entry itself a tuple
+   parallel to that entity's `attr_names`, so seeding a `StateStore` is a direct walk with no
+   second pass over the config.
 
 **Determinism is a hard requirement.** Same input → byte-identical output, including ordering. Test
 it directly (`test_compiler_is_deterministic`), because non-determinism here manifests as entities

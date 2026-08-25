@@ -10,7 +10,7 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
 **Read `docs/` before writing code.** This file governs *how* code gets written; `docs/` governs
 *what* gets built and in what order ([`docs/11-implementation-plan.md`](docs/11-implementation-plan.md)).
 
-**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP2`](docs/11-implementation-plan.md#wp2--sysap-client) landed.**
+**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP3`](docs/11-implementation-plan.md#wp3--model-and-compiler) landed.**
 
 - **WP0** — `pyproject.toml`/`ruff.toml`/strict `mypy`+`pytest` config, the package skeleton
   (docstring-only stubs), CI, the MIT licence decision.
@@ -24,10 +24,16 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
   (`WsReader`: heartbeat + independent idle watchdog, backoff+jitter reconnect that never gives
   up, SysAP-UUID handling, startup/resync buffering); `tests/fakes/fake_sysap.py` (every
   capability in docs/10 §3.1).
+- **WP3** — `model/codecs.py` (the full codec registry); `model/naming.py` (slugify + globally
+  symmetric collision resolution, so a new device can never steal an existing one's topic);
+  `model/entity.py` (`Entity`/`Binding`/`EgressBinding`, `AttributeSpec`/`CommandSpec`);
+  `profiles/_schema.json` + `model/profiles.py` (JSON-Schema-validated loader, built-in/user merge
+  order); `model/compiler.py` (the pure `compile()`: floor/room resolution, interface and orphan
+  filtering, profile matching with deterministic tie-breaks, P-01/P-02 input/output miswiring
+  guards, codec binding); `tests/bench/test_bench_compile.py` (`bench_compile`, P7).
 
-Every module below WP2 is still a docstring-only stub.
-[`docs/11 WP3`](docs/11-implementation-plan.md#wp3--model-and-compiler) (model and compiler) is
-next.
+Every module below WP3 is still a docstring-only stub.
+[`docs/11 WP4`](docs/11-implementation-plan.md#wp4--tier-1-profiles) (tier-1 profiles) is next.
 
 ---
 

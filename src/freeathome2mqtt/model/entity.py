@@ -114,3 +114,4 @@ class EgressBinding:
     continuous: bool
     optimistic_attr: int | None
     validate: Callable[[Any], Any]
+    confirm: bool = True

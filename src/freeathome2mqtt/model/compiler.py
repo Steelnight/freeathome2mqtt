@@ -564,6 +564,7 @@ def _build_commands(
             continuous=spec.continuous,
             optimistic_attr=optimistic_attr,
             validate=_make_range_validator(spec.range),
+            confirm=spec.confirm,
         )
 
     return egress

@@ -1,0 +1,578 @@
+"""Tests for bus/commands.py: object/attribute/scalar /set forms, validate-then-clamp, debounce,
+optimistic writes, reconciliation wiring, and rate-limited /get (docs/02 §5; docs/04 §3; docs/11
+WP7).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+from collections.abc import AsyncIterator
+from typing import Any
+
+import aiomqtt
+import orjson
+
+from fakes.fake_broker import running_fake_broker
+from fakes.fake_sysap import FakeSysAp, running_fake_sysap
+from freeathome2mqtt.bus.commands import CommandDispatcher
+from freeathome2mqtt.bus.reconcile import RateLimiter, Reconciler
+from freeathome2mqtt.bus.state import StateStore
+from freeathome2mqtt.model.codecs import build_codec
+from freeathome2mqtt.model.entity import AttrKind, Binding, EgressBinding, Entity
+from freeathome2mqtt.mqtt.client import MqttClient
+from freeathome2mqtt.sysap.rest import RestClient
+
+SERIAL = "ABB7F500E17A"
+BASE = "freeathome2mqtt"
+
+
+def _identity(value: Any) -> Any:
+    return value
+
+
+def _range_validator(low: float, high: float):
+    return lambda value: max(low, min(high, value))
+
+
+def _entity(idx: int, attr_names: tuple[str, ...], slug: str) -> Entity:
+    return Entity(
+        idx=idx,
+        id=f"{SERIAL}_ch{idx:04d}",
+        profile="test_profile",
+        name="Test",
+        area=None,
+        device_serial=SERIAL,
+        channel_id=f"ch{idx:04d}",
+        attr_names=attr_names,
+        attr_kinds=tuple(AttrKind.STATE for _ in attr_names),
+        state_topic=f"{BASE}/{slug}",
+        set_topic=f"{BASE}/{slug}/set",
+        get_topic=f"{BASE}/{slug}/get",
+        availability_topic=None,
+        optimistic=False,
+        discovery=(),
+    )
+
+
+def _binding(entity_idx: int, attr_idx: int, dp: str, codec_name: str) -> Binding:
+    codec = build_codec(codec_name)
+    return Binding(
+        entity_idx=entity_idx,
+        attr_idx=attr_idx,
+        decode=codec.decode,
+        kind=AttrKind.STATE,
+        attr_bit=1 << attr_idx,
+    )
+
+
+def _egress(
+    entity_idx: int,
+    channel_id: str,
+    dp: str,
+    codec_name: str,
+    *,
+    optimistic_attr: int | None,
+    continuous: bool = False,
+    value_range: tuple[float, float] | None = None,
+    confirm: bool = True,
+) -> EgressBinding:
+    codec = build_codec(codec_name)
+    validate = _identity if value_range is None else _range_validator(*value_range)
+    return EgressBinding(
+        entity_idx=entity_idx,
+        rest_path=f"{SERIAL}.{channel_id}.{dp}",
+        encode=codec.encode,
+        continuous=continuous,
+        optimistic_attr=optimistic_attr,
+        validate=validate,
+        confirm=confirm,
+    )
+
+
+def _channel(inputs: dict[str, str], outputs: dict[str, str]) -> dict[str, Any]:
+    return {
+        "inputs": {dp: {"value": v} for dp, v in inputs.items()},
+        "outputs": {dp: {"value": v} for dp, v in outputs.items()},
+    }
+
+
+def _fixture() -> tuple[list[Entity], dict, dict]:
+    """switch (ch0000): one discrete bool01 command. dimmer (ch0001): discrete state +
+    continuous brightness, declared in that order. noconfirm (ch0002): confirm:false command.
+    nocommands (ch0003): no egress entries at all. noopt (ch0004): a command with no optimistic
+    tracking (optimistic_attr=None).
+    """
+    entities = [
+        _entity(0, ("state",), "switch"),
+        _entity(1, ("state", "brightness"), "dimmer"),
+        _entity(2, ("state",), "noconfirm"),
+        _entity(3, ("state",), "nocommands"),
+        _entity(4, (), "noopt"),
+    ]
+    egress = {
+        (0, "state"): _egress(0, "ch0000", "idp0000", "bool01", optimistic_attr=0),
+        (1, "state"): _egress(1, "ch0001", "idp0010", "bool01", optimistic_attr=0),
+        (1, "brightness"): _egress(
+            1,
+            "ch0001",
+            "idp0011",
+            "percent_int",
+            optimistic_attr=1,
+            continuous=True,
+            value_range=(0, 100),
+        ),
+        (2, "state"): _egress(2, "ch0002", "idp0020", "bool01", optimistic_attr=0, confirm=False),
+        (4, "trigger"): _egress(4, "ch0004", "idp0040", "bool01", optimistic_attr=None),
+    }
+    ingress = {
+        f"{SERIAL}/ch0000/odp0000": _binding(0, 0, "odp0000", "bool01"),
+        f"{SERIAL}/ch0001/odp0010": _binding(1, 0, "odp0010", "bool01"),
+        f"{SERIAL}/ch0001/odp0011": _binding(1, 1, "odp0011", "percent_int"),
+        f"{SERIAL}/ch0002/odp0020": _binding(2, 0, "odp0020", "bool01"),
+    }
+    return entities, egress, ingress
+
+
+def _fake_configuration() -> dict[str, Any]:
+    return {
+        "devices": {
+            SERIAL: {
+                "channels": {
+                    "ch0000": _channel({"idp0000": "0"}, {"odp0000": "0"}),
+                    "ch0001": _channel(
+                        {"idp0010": "0", "idp0011": "0"}, {"odp0010": "0", "odp0011": "0"}
+                    ),
+                    "ch0002": _channel({"idp0020": "0"}, {"odp0020": "0"}),
+                    "ch0004": _channel({"idp0040": "0"}, {}),
+                }
+            }
+        }
+    }
+
+
+async def _wait_until(predicate, *, timeout_seconds: float = 5.0, interval: float = 0.005) -> None:
+    async with asyncio.timeout(timeout_seconds):
+        while not predicate():  # noqa: ASYNC110 -- generic poll, no single event to await
+            await asyncio.sleep(interval)
+
+
+class _Environment:
+    """Wires a full real stack: broker, bridge MqttClient, fake SysAP, RestClient,
+    CommandDispatcher.
+    """
+
+    def __init__(
+        self,
+        *,
+        broker: Any,
+        fake: FakeSysAp,
+        rest: Any,
+        mqtt_client: MqttClient,
+        outsider: aiomqtt.Client,
+        state: StateStore,
+        dispatcher: CommandDispatcher,
+        entities: list[Entity],
+    ) -> None:
+        self.broker = broker
+        self.fake = fake
+        self.rest = rest
+        self.mqtt_client = mqtt_client
+        self.outsider = outsider
+        self.state = state
+        self.dispatcher = dispatcher
+        self.entities = entities
+        self.responses: list[tuple[str, dict[str, Any]]] = []
+
+    async def collect_responses(self, *, count: int, timeout_seconds: float = 2.0) -> None:
+        async with asyncio.timeout(timeout_seconds):
+            async for message in self.outsider.messages:
+                self.responses.append((str(message.topic), orjson.loads(message.payload)))
+                if len(self.responses) >= count:
+                    return
+
+
+@contextlib.asynccontextmanager
+async def _environment(*, debounce_s: float = 0.05) -> AsyncIterator[_Environment]:
+    entities, egress, ingress = _fixture()
+    state = StateStore(entities)
+    by_topic = {e.state_topic.rsplit("/", 1)[-1]: e.idx for e in entities}
+
+    # CommandDispatcher needs the MqttClient instance to publish responses, and MqttClient needs
+    # an on_message callback at construction time -- resolved with a small forwarding closure
+    # rather than reaching into MqttClient's private state after the fact.
+    dispatcher_holder: list[CommandDispatcher] = []
+
+    def _forward(message: aiomqtt.Message) -> None:
+        dispatcher_holder[0].on_message(message)
+
+    async with running_fake_broker() as broker:
+        mqtt_client = MqttClient(
+            host="127.0.0.1",
+            port=broker.port,
+            base_topic=BASE,
+            sysap_serial=SERIAL,
+            backoff_initial=0.02,
+            backoff_cap=0.2,
+            on_message=_forward,
+        )
+        mqtt_task = asyncio.create_task(mqtt_client.run())
+        await _wait_until(lambda: mqtt_client.reconnect_count >= 1)
+
+        async with running_fake_sysap(FakeSysAp()) as (fake, http_client):
+            fake.set_configuration(_fake_configuration())
+            rest = RestClient(
+                base_url=str(http_client.make_url("")).rstrip("/"),
+                username="installer",
+                password="secret",
+                session=http_client.session,
+            )
+            await rest.get_configuration()
+
+            rate_limiter = RateLimiter()
+            reconciler = Reconciler(
+                state=state,
+                rest=rest,
+                ingress_table=ingress,
+                rate_limiter=rate_limiter,
+                delay_s=0.05,
+            )
+            dispatcher = CommandDispatcher(
+                entities=entities,
+                egress=egress,
+                by_topic=by_topic,
+                state=state,
+                rest=rest,
+                mqtt=mqtt_client,
+                reconciler=reconciler,
+                rate_limiter=rate_limiter,
+                base_topic=BASE,
+                debounce_s=debounce_s,
+            )
+            dispatcher_holder.append(dispatcher)
+
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as outsider:
+                await outsider.subscribe(f"{BASE}/bridge/response/#")
+                env = _Environment(
+                    broker=broker,
+                    fake=fake,
+                    rest=rest,
+                    mqtt_client=mqtt_client,
+                    outsider=outsider,
+                    state=state,
+                    dispatcher=dispatcher,
+                    entities=entities,
+                )
+                try:
+                    yield env
+                finally:
+                    await mqtt_client.stop()
+                    await asyncio.wait_for(mqtt_task, timeout=5.0)
+
+
+_UUID = "00000000-0000-0000-0000-000000000000"
+
+
+def _dp_path(address: str) -> str:
+    return f"/fhapi/v1/api/rest/datapoint/{_UUID}/{address}"
+
+
+def _input_value(fake: FakeSysAp, channel: str, dp: str) -> str:
+    # No public getter exists on the fake; reaching into its configuration is test-only
+    # introspection of the double, not production code.
+    value: str = fake._configuration["devices"][SERIAL]["channels"][channel]["inputs"][dp]["value"]
+    return value
+
+
+async def test_set_object_form_optimistic_write_and_rest_dispatch() -> None:
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/switch/set", orjson.dumps({"state": True}))
+        await _wait_until(lambda: env.state.values[0][0] is True)
+
+        assert env.state.unconfirmed[0] == 0b1
+        assert env.state.dirty == {0}
+        await _wait_until(lambda: env.fake.request_count(_dp_path(f"{SERIAL}.ch0000.idp0000")) >= 1)
+        assert _input_value(env.fake, "ch0000", "idp0000") == "1"
+
+
+async def test_set_attribute_form() -> None:
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/dimmer/set/brightness", b"75")
+        await _wait_until(lambda: env.state.values[1][1] == 75)
+        await _wait_until(lambda: env.fake.request_count(_dp_path(f"{SERIAL}.ch0001.idp0011")) >= 1)
+        assert _input_value(env.fake, "ch0001", "idp0011") == "75"
+
+
+async def test_set_scalar_shorthand_true_maps_to_the_primary_command() -> None:
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/switch/set", b"true")
+        await _wait_until(lambda: env.state.values[0][0] is True)
+
+
+async def test_set_scalar_shorthand_on_off_strings() -> None:
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/switch/set", b"ON")
+        await _wait_until(lambda: env.state.values[0][0] is True)
+
+        await env.outsider.publish(f"{BASE}/switch/set", b"OFF")
+        await _wait_until(lambda: env.state.values[0][0] is False)
+
+
+async def test_set_object_form_applies_attributes_in_profile_declaration_order() -> None:
+    # docs/04 §3.1: JSON key order must not matter -- "state" is declared before "brightness".
+    async with _environment() as env:
+        await env.outsider.publish(
+            f"{BASE}/dimmer/set", orjson.dumps({"brightness": 40, "state": True})
+        )
+        await _wait_until(lambda: env.state.values[1][1] == 40)
+        assert env.state.values[1][0] is True
+
+
+async def test_set_rejects_an_unknown_command() -> None:
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/switch/set", orjson.dumps({"nope": True}))
+        await env.collect_responses(count=1)
+
+        topic, payload = env.responses[0]
+        assert topic == f"{BASE}/bridge/response/set"
+        assert payload["status"] == "error"
+        assert payload["id"] == "ABB7F500E17A_ch0000"
+        assert env.state.dirty == set()  # never touched
+
+
+async def test_set_clamps_an_out_of_range_value() -> None:
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/dimmer/set", orjson.dumps({"brightness": 150}))
+        await _wait_until(lambda: env.state.values[1][1] == 100)  # clamped, not rejected
+
+
+async def test_set_rejects_a_structurally_wrong_value() -> None:
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/dimmer/set", orjson.dumps({"brightness": "bright"}))
+        await env.collect_responses(count=1)
+
+        assert env.responses[0][1]["status"] == "error"
+        assert env.state.values[1][1] is None  # never applied
+
+
+async def test_set_echoes_the_transaction_on_success() -> None:
+    async with _environment() as env:
+        await env.outsider.publish(
+            f"{BASE}/switch/set", orjson.dumps({"state": True, "transaction": "abc123"})
+        )
+        await env.collect_responses(count=1)
+
+        topic, payload = env.responses[0]
+        assert topic == f"{BASE}/bridge/response/set"
+        assert payload == {"status": "ok", "id": "ABB7F500E17A_ch0000", "transaction": "abc123"}
+
+
+async def test_set_echoes_the_transaction_on_error() -> None:
+    async with _environment() as env:
+        await env.outsider.publish(
+            f"{BASE}/switch/set", orjson.dumps({"nope": True, "transaction": "xyz"})
+        )
+        await env.collect_responses(count=1)
+
+        assert env.responses[0][1]["transaction"] == "xyz"
+
+
+async def test_set_without_a_transaction_gets_no_success_response() -> None:
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/switch/set", orjson.dumps({"state": True}))
+        await _wait_until(lambda: env.state.values[0][0] is True)
+        await asyncio.sleep(0.1)  # give a wrongly-always-acking implementation time to respond
+
+        assert env.responses == []
+
+
+async def test_set_no_optimistic_suppresses_the_optimistic_write() -> None:
+    async with _environment() as env:
+        await env.outsider.publish(
+            f"{BASE}/switch/set", orjson.dumps({"state": True, "no_optimistic": True})
+        )
+        await _wait_until(lambda: env.fake.request_count(_dp_path(f"{SERIAL}.ch0000.idp0000")) >= 1)
+
+        assert env.state.values[0][0] is None  # the REST write still happened, just not the guess
+        assert env.state.unconfirmed[0] == 0
+
+
+async def test_continuous_command_debounces_leading_and_trailing_edge() -> None:
+    # docs/05 §4.2: leading edge sends immediately; further /set inside the window only update
+    # `pending`; the window's close sends the final value if it differs from what was last sent.
+    async with _environment(debounce_s=0.1) as env:
+        path = _dp_path(f"{SERIAL}.ch0001.idp0011")
+
+        await env.outsider.publish(f"{BASE}/dimmer/set", orjson.dumps({"brightness": 10}))
+        await _wait_until(lambda: env.fake.request_count(path) >= 1)
+        assert _input_value(env.fake, "ch0001", "idp0011") == "10"  # leading edge
+
+        await env.outsider.publish(f"{BASE}/dimmer/set", orjson.dumps({"brightness": 20}))
+        await env.outsider.publish(f"{BASE}/dimmer/set", orjson.dumps({"brightness": 30}))
+        assert env.fake.request_count(path) == 1  # still just the leading edge -- not yet sent
+
+        await _wait_until(lambda: env.fake.request_count(path) >= 2, timeout_seconds=2.0)
+        assert _input_value(env.fake, "ch0001", "idp0011") == "30"  # trailing edge: final value
+        assert env.fake.request_count(path) == 2  # 20 was collapsed into pending, never sent
+
+
+async def test_discrete_command_is_never_debounced() -> None:
+    # A window long enough to catch a wrongly-debounced discrete command.
+    async with _environment(debounce_s=1.0) as env:
+        path = _dp_path(f"{SERIAL}.ch0000.idp0000")
+
+        await env.outsider.publish(f"{BASE}/switch/set", orjson.dumps({"state": True}))
+        await env.outsider.publish(f"{BASE}/switch/set", orjson.dumps({"state": False}))
+        await _wait_until(lambda: env.fake.request_count(path) >= 2)
+
+
+async def test_command_failure_rolls_back_via_immediate_reconciliation() -> None:
+    # F12: no retry; error to bridge/response; reconcile immediately (not after the 3s timer) so
+    # the optimistic lie is corrected within one round trip.
+    async with _environment() as env:
+        env.fake.set_error(_dp_path(f"{SERIAL}.ch0000.idp0000"), 400)
+
+        # The optimistic guess (True) and its correction (False) can both land before a poll
+        # ever observes the guess -- 400 raises with no retry, so the whole chain (optimistic
+        # write -> failed PUT -> immediate reconcile) can complete within microseconds. Only the
+        # settled outcome is asserted below, not the transient intermediate state.
+        await env.outsider.publish(f"{BASE}/switch/set", orjson.dumps({"state": True}))
+
+        await env.collect_responses(count=1)
+        assert env.responses[0][0] == f"{BASE}/bridge/response/set"
+        assert env.responses[0][1]["status"] == "error"
+
+        # The write never actually reached the SysAP, so odp0000 is still "0" -- reconciliation
+        # reads that back and rolls the optimistic guess back to False.
+        await _wait_until(lambda: env.state.values[0][0] is False, timeout_seconds=2.0)
+        assert env.state.unconfirmed[0] == 0
+
+
+async def test_get_refreshes_a_single_named_attribute() -> None:
+    async with _environment() as env:
+        env.fake.set_datapoint(SERIAL, "ch0000", "odp0000", "1")
+
+        await env.outsider.publish(f"{BASE}/switch/get", orjson.dumps({"attribute": "state"}))
+
+        await _wait_until(lambda: env.state.values[0][0] is True)
+
+
+async def test_get_with_an_empty_payload_refreshes_every_state_attribute() -> None:
+    async with _environment() as env:
+        env.fake.set_datapoint(SERIAL, "ch0001", "odp0010", "1")
+        env.fake.set_datapoint(SERIAL, "ch0001", "odp0011", "42")
+
+        await env.outsider.publish(f"{BASE}/dimmer/get", b"{}")
+
+        await _wait_until(lambda: env.state.values[1] == [True, 42])
+
+
+async def test_get_rejects_an_unknown_attribute() -> None:
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/switch/get", orjson.dumps({"attribute": "nope"}))
+        await env.collect_responses(count=1)
+
+        topic, payload = env.responses[0]
+        assert topic == f"{BASE}/bridge/response/get"
+        assert payload["status"] == "error"
+
+
+async def test_get_storm_is_rate_limited() -> None:
+    # P-52: a loop hammering /get for one entity must not amplify into repeated SysAP reads.
+    async with _environment() as env:
+        path = _dp_path(f"{SERIAL}.ch0000.odp0000")
+
+        await env.outsider.publish(f"{BASE}/switch/get", b"{}")
+        await _wait_until(lambda: env.fake.request_count(path) >= 1)
+
+        await env.outsider.publish(f"{BASE}/switch/get", b"{}")
+        await env.collect_responses(count=1)
+
+        topic, payload = env.responses[0]
+        assert topic == f"{BASE}/bridge/response/get"
+        assert payload["status"] == "error"
+        assert payload["error"] == "rate_limited"
+        assert env.fake.request_count(path) == 1  # the second /get never reached the SysAP
+
+
+async def test_unconfirmed_command_is_reconciled() -> None:
+    # ADR-012/P-53: with no WS echo ever arriving in this harness, only the reconciliation timer
+    # (armed at 0.05s by _environment()) can clear the unconfirmed mark.
+    async with _environment() as env:
+        env.fake.set_datapoint(SERIAL, "ch0000", "odp0000", "1")  # what the SysAP will "confirm"
+
+        await env.outsider.publish(f"{BASE}/switch/set", orjson.dumps({"state": True}))
+        await _wait_until(lambda: env.state.unconfirmed[0] & 0b1)  # the optimistic mark is set
+
+        await _wait_until(lambda: env.state.unconfirmed[0] == 0, timeout_seconds=2.0)
+        assert env.state.values[0][0] is True  # confirmed correct by the read, not by an echo
+
+
+async def test_no_reconcile_when_confirm_false() -> None:
+    # P-19: not every channel type echoes; confirm:false must never arm a reconcile timer.
+    async with _environment() as env:
+        path = _dp_path(f"{SERIAL}.ch0002.odp0020")
+
+        await env.outsider.publish(f"{BASE}/noconfirm/set", orjson.dumps({"state": True}))
+        await _wait_until(lambda: env.state.values[2][0] is True)  # the optimistic write happens
+
+        await asyncio.sleep(0.2)  # comfortably past the 0.05s reconcile delay used in this harness
+        assert env.fake.request_count(path) == 0
+
+
+async def test_on_message_ignores_a_bridge_request_topic() -> None:
+    # "bridge" is not a known entity slug -- the bridge API itself is WP9's mqtt/bridge_api.py.
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/bridge/request/reload", b"{}")
+        await asyncio.sleep(0.1)
+        assert env.state.dirty == set()
+
+
+def test_parse_topic_rejects_topics_outside_the_base_and_malformed_shapes() -> None:
+    entities, egress, _ingress = _fixture()
+    state = StateStore(entities)
+    by_topic = {e.state_topic.rsplit("/", 1)[-1]: e.idx for e in entities}
+    dispatcher = CommandDispatcher(
+        entities=entities,
+        egress=egress,
+        by_topic=by_topic,
+        state=state,
+        rest=None,  # type: ignore[arg-type] -- _parse_topic touches none of these
+        mqtt=None,  # type: ignore[arg-type]
+        reconciler=None,  # type: ignore[arg-type]
+        rate_limiter=None,  # type: ignore[arg-type]
+        base_topic=BASE,
+    )
+
+    assert dispatcher._parse_topic("other/switch/set") is None
+    assert dispatcher._parse_topic(f"{BASE}/switch/set/extra/segments") is None
+
+
+async def test_set_scalar_shorthand_with_no_known_commands_is_a_noop() -> None:
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/nocommands/set", b"true")
+        await asyncio.sleep(0.1)
+        assert env.state.dirty == set()
+
+
+async def test_continuous_command_with_no_follow_up_sends_exactly_once() -> None:
+    async with _environment(debounce_s=0.05) as env:
+        path = _dp_path(f"{SERIAL}.ch0001.idp0011")
+
+        await env.outsider.publish(f"{BASE}/dimmer/set", orjson.dumps({"brightness": 10}))
+        await _wait_until(lambda: env.fake.request_count(path) >= 1)
+        await asyncio.sleep(0.15)  # past the window close, with no follow-up message
+
+        assert env.fake.request_count(path) == 1  # no redundant resend of the same value
+
+
+async def test_write_failure_without_optimistic_tracking_still_responds() -> None:
+    # A command with no `optimistic:` attribute has nothing to roll back -- failure must still
+    # report the error, just without attempting reconciliation.
+    async with _environment() as env:
+        env.fake.set_error(_dp_path(f"{SERIAL}.ch0004.idp0040"), 400)
+
+        await env.outsider.publish(f"{BASE}/noopt/set", orjson.dumps({"trigger": True}))
+        await env.collect_responses(count=1)
+
+        assert env.responses[0][1]["status"] == "error"

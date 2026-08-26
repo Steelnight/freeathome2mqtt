@@ -91,6 +91,7 @@ class EgressBinding:                # egress: how to execute a command
     continuous: bool                # debounce this one
     optimistic_attr: int | None     # which attribute to update optimistically
     validate: Callable[[Any], Any]  # range/enum check; raises CommandError
+    confirm: bool = True            # arm bus/reconcile.py's timer for this command (P-19; WP7)
 ```
 
 The tables:

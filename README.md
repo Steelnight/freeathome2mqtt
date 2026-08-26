@@ -3,7 +3,7 @@
 A high-performance bridge between an **ABB / Busch-Jaeger free@home** System Access Point (SysAP)
 and **MQTT**.
 
-> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP6](docs/11-implementation-plan.md#wp6--ingress-and-the-hot-path)
+> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP7](docs/11-implementation-plan.md#wp7--commands-optimism-reconciliation)
 > landed.** Bootstrap tooling, the generated pairing/function/parameter/interface code tables, the
 > SysAP settings pre-flight, the capture tool's pseudonymisation, the `minimal`/`typical`/`nasty`
 > configuration fixtures, a real SysAP client (`RestClient`, `WsReader` against a from-scratch fake
@@ -16,13 +16,18 @@ and **MQTT**.
 > backoff+jitter reconnect that never gives up, retained republish after reconnect), the
 > coalescing state-publish loop (`StateStore` + `Publisher`, docs/05 §4.1), and the non-coalescing
 > event path for buttons/triggers, all tested against a real in-process broker rather than a mock —
-> and now the ingest hot path itself: `Ingress` (docs/02 §4), fully synchronous end to end so a slow
-> MQTT publish can never block the WebSocket reader (rule R1), plus `metrics.py`'s counters. 100% of
-> the `typical.json` fixture's channels match a profile (floor: 85%); `bench_latency`/`bench_ingest`
-> both meet their P1/P2/P3 budgets against the real pipeline. The documents under [`docs/`](docs/)
-> are written to be executed by an implementing agent (human or AI) top to bottom, and
-> [WP7](docs/11-implementation-plan.md#wp7--commands-optimism-reconciliation) (commands, optimism,
-> reconciliation) is next.
+> the ingest hot path itself: `Ingress` (docs/02 §4), fully synchronous end to end so a slow MQTT
+> publish can never block the WebSocket reader (rule R1), plus `metrics.py`'s counters — and now the
+> command path: `CommandDispatcher` (object/attribute/scalar `/set` forms, docs/04 §3;
+> validate-then-clamp; leading+trailing debounce with reset-on-each-message semantics so a held
+> slider costs one extra write regardless of drag length, docs/05 §4.2; rate-limited `/get`) and
+> `Reconciler` (ADR-012's optimistic-write safety net: a 3 s per-attribute timer that self-cancels
+> on a confirming WS echo, one targeted read and a rollback otherwise). 100% of the `typical.json`
+> fixture's channels match a profile (floor: 85%); `bench_latency`/`bench_ingest`/
+> `bench_command_debounce` all meet their P1–P5 budgets against the real pipeline. The documents
+> under [`docs/`](docs/) are written to be executed by an implementing agent (human or AI) top to
+> bottom, and [WP8](docs/11-implementation-plan.md#wp8--supervisor-lifecycle-resilience)
+> (supervisor, lifecycle, resilience) is next.
 
 ---
 

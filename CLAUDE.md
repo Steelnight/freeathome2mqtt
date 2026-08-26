@@ -10,7 +10,7 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
 **Read `docs/` before writing code.** This file governs *how* code gets written; `docs/` governs
 *what* gets built and in what order ([`docs/11-implementation-plan.md`](docs/11-implementation-plan.md)).
 
-**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP6`](docs/11-implementation-plan.md#wp6--ingress-and-the-hot-path) landed.**
+**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP7`](docs/11-implementation-plan.md#wp7--commands-optimism-reconciliation) landed.**
 
 - **WP0** — `pyproject.toml`/`ruff.toml`/strict `mypy`+`pytest` config, the package skeleton
   (docstring-only stubs), CI, the MIT licence decision.
@@ -61,10 +61,25 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
   budget, run against the real pipeline (fake SysAP, `WsReader`, `Ingress`, `StateStore`,
   `Publisher`, a real `MqttClient`/broker) per docs/10 §7 — `bench_ingest`'s traffic window is 5 s,
   not docs/05 §8's literal 60 s; see that section's footnote for why.
+- **WP7** — `bus/commands.py` (`CommandDispatcher`: object/attribute/scalar `/set` forms applied in
+  profile-declaration order regardless of JSON key order, docs/04 §3.1; validate-then-clamp-then-
+  encode with a `bridge/response/set` error for anything structurally wrong; leading+trailing
+  debounce for `continuous` commands with reset-on-each-message semantics, docs/05 §4.2 — a held
+  slider produces exactly one more write however long the drag runs, not one per fixed window;
+  `/get` with a shared rate limiter, docs/04 §3.4); `bus/reconcile.py` (`RateLimiter` + `Reconciler`:
+  a 3 s per-attribute timer that self-cancels if the WS echo confirms first, one targeted `GET` and
+  `StateStore.apply()` otherwise — same for F12's immediate reconciliation on a failed write).
+  Closes a real WP5 gap along the way: `StateStore.apply()` only cleared the unconfirmed bit on the
+  changed-value branch, so an echo confirming an optimistic guess *exactly* never got reconciled
+  off (docs/08 §3); it now clears unconditionally. `EgressBinding` gained a `confirm: bool` field
+  (docs/03 §2) carrying `CommandSpec.confirm` through compilation, needed for P-19's `confirm:
+  false` opt-out. `bench_command_debounce` (P5) meets budget against the real pipeline (fake SysAP,
+  a real broker, `MqttClient`, `RestClient`, `CommandDispatcher`) — 60 `/set` at 30 Hz over 2 s
+  collapse to exactly 2 SysAP writes, matching docs/05 §4.2's canonical example.
 
-Every module below WP6 is still a docstring-only stub.
-[`docs/11 WP7`](docs/11-implementation-plan.md#wp7--commands-optimism-reconciliation) (commands,
-optimism, reconciliation) is next.
+Every module below WP7 is still a docstring-only stub.
+[`docs/11 WP8`](docs/11-implementation-plan.md#wp8--supervisor-lifecycle-resilience) (supervisor,
+lifecycle, resilience) is next.
 
 ---
 

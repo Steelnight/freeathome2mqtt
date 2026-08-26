@@ -29,18 +29,34 @@ class StateStore:
     def apply(self, entity_idx: int, attr_idx: int, value: Any, *, attr_bit: int = 0) -> bool:
         """Change detection (docs/05 §3 R4): store and mark dirty only if `value` actually changed.
 
-        `attr_bit`, when given, is cleared from the unconfirmed bitmask on any change to that
-        attribute -- the change may be the echo confirming a just-issued command (docs/02 §4).
+        `attr_bit`, when given, is cleared from the unconfirmed bitmask unconditionally -- even
+        when `value` turns out to equal what was already stored. The clear must not be gated by
+        change detection: an echo that confirms an optimistic guess *exactly* (docs/08 §3: "value
+        already 55 -> clear unconfirmed, no publish") is still the confirmation `bus/reconcile.py`
+        is waiting for, and skipping it here would leave that command reconciled off only by
+        (harmless but pointless) timeout instead of by its own echo.
         Returns whether the value changed.
         """
+        self.unconfirmed[entity_idx] &= ~attr_bit
         slot = self.values[entity_idx]
         if slot[attr_idx] == value:
             return False
         slot[attr_idx] = value
-        self.unconfirmed[entity_idx] &= ~attr_bit
         self.dirty.add(entity_idx)
         self.wake.set()
         return True
+
+    def mark_optimistic(self, entity_idx: int, attr_idx: int, value: Any, *, attr_bit: int) -> None:
+        """Optimistic command write (ADR-012): store the guessed value, mark it unconfirmed, and
+        mark dirty unconditionally. A command is a deliberate user action, not a hot-path repeat,
+        so unlike `apply()` this is never gated by R4 change detection -- docs/02 §5's sequence
+        diagram always publishes the optimistic state, even if it happens to match what is already
+        held.
+        """
+        self.values[entity_idx][attr_idx] = value
+        self.unconfirmed[entity_idx] |= attr_bit
+        self.dirty.add(entity_idx)
+        self.wake.set()
 
     def take_dirty(self) -> set[int]:
         """Atomically swap out the dirty set for a fresh one (docs/05 §4.1)."""

@@ -83,6 +83,18 @@ def test_apply_without_attr_bit_leaves_unconfirmed_untouched() -> None:
     assert store.unconfirmed[0] == 0b1
 
 
+def test_apply_clears_unconfirmed_bit_even_when_the_value_is_unchanged() -> None:
+    # docs/08 §3: an echo that confirms an optimistic guess exactly (no value change) must still
+    # clear the mark -- otherwise a correctly-guessed command never gets reconciled off (ADR-012).
+    store = StateStore([_entity(0, ("state", "brightness"))])
+    store.seed(0, 1, 43)
+    store.unconfirmed[0] = 0b10
+    changed = store.apply(0, 1, 43, attr_bit=0b10)
+    assert changed is False
+    assert store.unconfirmed[0] == 0
+    assert store.dirty == set()
+
+
 def test_take_dirty_swaps_and_clears() -> None:
     store = StateStore([_entity(0, ("state",)), _entity(1, ("state",))])
     store.apply(0, 0, True)
@@ -95,3 +107,21 @@ def test_take_dirty_swaps_and_clears() -> None:
 def test_take_dirty_on_an_empty_store_returns_an_empty_set() -> None:
     store = StateStore([_entity(0, ("state",))])
     assert store.take_dirty() == set()
+
+
+def test_mark_optimistic_stores_sets_unconfirmed_and_marks_dirty() -> None:
+    store = StateStore([_entity(0, ("state",))])
+    store.mark_optimistic(0, 0, True, attr_bit=0b1)
+    assert store.values[0][0] is True
+    assert store.unconfirmed[0] == 0b1
+    assert store.dirty == {0}
+    assert store.wake.is_set()
+
+
+def test_mark_optimistic_marks_dirty_even_when_the_value_is_unchanged() -> None:
+    # A command is a deliberate action; unlike apply()'s R4 gate, it always publishes.
+    store = StateStore([_entity(0, ("state",))])
+    store.seed(0, 0, True)
+    store.mark_optimistic(0, 0, True, attr_bit=0b1)
+    assert store.dirty == {0}
+    assert store.unconfirmed[0] == 0b1

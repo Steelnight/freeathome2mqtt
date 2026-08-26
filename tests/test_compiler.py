@@ -151,6 +151,27 @@ def test_compile_builds_ingress_and_egress_tables() -> None:
     assert egress.encode(True) == "1"
     assert egress.optimistic_attr == 0
     assert egress.continuous is False
+    assert egress.confirm is True
+
+
+def test_compile_carries_confirm_false_through_to_the_egress_binding() -> None:
+    # P-19: not every channel type echoes; a profile author opts a command out of reconciliation
+    # entirely via `confirm: false` (docs/03 §3.3), and that must survive compilation.
+    profile = {
+        **_SWITCH_PROFILE,
+        "commands": {
+            "state": {
+                "pairing": "AL_SWITCH_ON_OFF",
+                "codec": "bool01",
+                "optimistic": "state",
+                "confirm": False,
+            }
+        },
+    }
+    config = _config({"ABB700990001": _device({"ch0000": _switch_channel()})})
+    registry = build_registry([parse_profile(profile, source="<test>")])
+    model = compile(config, registry, CompileOptions())
+    assert model.egress[(0, "state")].confirm is False
 
 
 def test_compile_seeds_initial_values_from_the_snapshot() -> None:

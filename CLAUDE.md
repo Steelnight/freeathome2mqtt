@@ -10,7 +10,7 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
 **Read `docs/` before writing code.** This file governs *how* code gets written; `docs/` governs
 *what* gets built and in what order ([`docs/11-implementation-plan.md`](docs/11-implementation-plan.md)).
 
-**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP4`](docs/11-implementation-plan.md#wp4--tier-1-profiles) landed.**
+**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP5`](docs/11-implementation-plan.md#wp5--mqtt-layer) landed.**
 
 - **WP0** — `pyproject.toml`/`ruff.toml`/strict `mypy`+`pytest` config, the package skeleton
   (docstring-only stubs), CI, the MIT licence decision.
@@ -37,9 +37,23 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
   `@transform` registry with `room_temperature_controller` and `cover_with_slats`; round-trip
   fixtures for every profile plus the named P-03/P-07/P-08/P-09 tests. 100% of `typical.json`'s
   167 channels match a profile (floor: 85%).
+- **WP5** — `mqtt/topics.py` (the sole source of topic strings; also now used by
+  `model/compiler.py`, closing a rule the module layout had documented since WP3 but couldn't
+  honour before this module existed); `mqtt/client.py` (`MqttClient`: LWT armed before connect,
+  narrow ADR-006 subscriptions re-applied on every connect, backoff+jitter reconnect that never
+  gives up, `freeathome2mqtt_<serial>` client id, per-topic last-published-bytes tracking,
+  unconditional retained-republish 2 s after every connect — the `bridge/info`-echo cancellation
+  optimisation is deferred to WP9 — MQTT 3.1.1 only for now, see the module docstring for why MQTT
+  5 is deferred); `bus/state.py` (`StateStore`: values, dirty set, unconfirmed marks); `bus/
+  publisher.py` (the coalescing loop, docs/05 §4.1, and payload building); `bus/events.py` (the
+  non-coalescing, non-retained edge path, P-32). Tested against a real in-process broker
+  (`tests/fakes/fake_broker.py`, an `amqtt` broker — Docker is unavailable in this environment, so
+  this is docs/10 §3.4's "fallback so the suite runs without Docker"). `bench_burst` (P4) and
+  `bench_dedup` (P12) both meet budget.
 
-Every module below WP4 is still a docstring-only stub.
-[`docs/11 WP5`](docs/11-implementation-plan.md#wp5--mqtt-layer) (the MQTT layer) is next.
+Every module below WP5 is still a docstring-only stub.
+[`docs/11 WP6`](docs/11-implementation-plan.md#wp6--ingress-and-the-hot-path) (ingress and the hot
+path) is next.
 
 ---
 

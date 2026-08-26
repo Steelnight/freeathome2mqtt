@@ -26,6 +26,12 @@ from freeathome2mqtt.model.entity import (
 )
 from freeathome2mqtt.model.naming import SlugCandidate, resolve_slugs, slugify
 from freeathome2mqtt.model.profiles import Profile, ProfileRegistry
+from freeathome2mqtt.mqtt.topics import (
+    entity_availability_topic,
+    entity_get_topic,
+    entity_set_topic,
+    entity_state_topic,
+)
 from freeathome2mqtt.sysap.codes import Function, Pairing, Parameter
 from freeathome2mqtt.sysap.schema import Channel, Configuration, Device, InOutPut, parse_function_id
 
@@ -571,7 +577,7 @@ def _build_entity(
     egress = _build_commands(compiled, idx, attr_index_by_name)
 
     topic_slug = slugify(compiled.entity_id) if options.topic_style == "id" else slug
-    state_topic = f"{options.topic_prefix}/{topic_slug}"
+    state_topic = entity_state_topic(options.topic_prefix, topic_slug)
     has_optimistic_command = any(
         cmd.optimistic is not None for cmd in compiled.profile.commands.values()
     )
@@ -587,9 +593,9 @@ def _build_entity(
         attr_names=attrs.names,
         attr_kinds=attrs.kinds,
         state_topic=state_topic,
-        set_topic=f"{state_topic}/set",
-        get_topic=f"{state_topic}/get",
-        availability_topic=f"{state_topic}/availability"
+        set_topic=entity_set_topic(state_topic),
+        get_topic=entity_get_topic(state_topic),
+        availability_topic=entity_availability_topic(state_topic)
         if compiled.profile.availability == "device"
         else None,
         optimistic=has_optimistic_command,

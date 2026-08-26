@@ -388,8 +388,14 @@ useful middle ground, and the recommended setting for anyone filing an issue.
 - Payloads are UTF-8 JSON. `bridge/devices` may be large; see §4.3.
 - The bridge sets an MQTT client id of `freeathome2mqtt_<sysap_serial>` so two bridges against two
   SysAPs on one broker do not evict each other — a genuinely confusing failure to debug.
-- MQTT 5 is used when the broker supports it (for `maximumPacketSize` and better disconnect reason
-  codes), falling back to 3.1.1 automatically.
+- MQTT 5 is the eventual default (for `maximumPacketSize` and better disconnect reason codes),
+  falling back to 3.1.1 automatically -- **deferred** (WP5): `identifier` (a fixed client id) plus
+  `will` (the LWT) together on an MQTT 5 CONNECT hangs indefinitely with the `paho-mqtt` 2.1.0 /
+  `aiomqtt` 2.5.1 pairing this project currently pins, reproduced in isolation and independent of
+  the broker on the other end (see the comment at the top of `mqtt/client.py`). The bridge speaks
+  MQTT 3.1.1 only until that combination is fixed upstream or worked around differently.
 - After reconnect, retained messages are republished once (2 s later) for brokers that do not
-  persist retained state across restarts, then cancelled if the broker proves it did retain by
-  echoing `bridge/info` back.
+  persist retained state across restarts. The echo-based cancellation ("stop once the broker
+  proves it did retain, by echoing `bridge/info` back") is deferred to WP9, when `bridge/info`
+  exists; WP5 republishes unconditionally on every connect instead, which is simply the same fix
+  applied slightly more often than strictly necessary, not incorrect.

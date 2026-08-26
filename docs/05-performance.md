@@ -237,7 +237,7 @@ so they are hermetic and can gate CI.
 | Bench | Scenario | Asserts |
 |---|---|---|
 | `bench_latency` | 1 000 single datapoint changes, timestamped in/out | P1, P2 |
-| `bench_ingest` | 60 s of synthetic traffic at 5 000 dp/s | P3; publisher never falls behind by > 1 window |
+| `bench_ingest` | 5 s¹ of synthetic traffic at 5 000 dp/s | P3; publisher never falls behind by > 1 window |
 | `bench_burst` | One frame with 500 datapoints across 40 entities | P4 |
 | `bench_command_debounce` | 60 `/set` over 2 s on one continuous command | P5 |
 | `bench_startup` | Cold start against a 1 000-channel fixture | P6, P7 |
@@ -249,6 +249,12 @@ so they are hermetic and can gate CI.
 
 Results are written to `bench/results.json` and compared against a committed baseline; CI fails on a
 regression beyond tolerance. This turns the budgets above from aspiration into a contract.
+
+¹ Reduced from a 60 s soak for the per-PR bench suite (docs/11 WP6): the property under test --
+the coalescing loop's flush cadence keeping pace with the arrival rate, not accumulating a growing
+backlog -- manifests within a handful of 20ms coalescing windows, and a 5 s run already contains
+~250 of them. A true 60 s (or longer) continuous-traffic run belongs with the nightly soak suite
+(docs/10 §8), which is a different, much broader chaos scenario not yet implemented.
 
 ## 9. Profiling recipe
 

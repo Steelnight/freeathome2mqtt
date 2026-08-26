@@ -10,7 +10,7 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
 **Read `docs/` before writing code.** This file governs *how* code gets written; `docs/` governs
 *what* gets built and in what order ([`docs/11-implementation-plan.md`](docs/11-implementation-plan.md)).
 
-**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP5`](docs/11-implementation-plan.md#wp5--mqtt-layer) landed.**
+**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP6`](docs/11-implementation-plan.md#wp6--ingress-and-the-hot-path) landed.**
 
 - **WP0** — `pyproject.toml`/`ruff.toml`/strict `mypy`+`pytest` config, the package skeleton
   (docstring-only stubs), CI, the MIT licence decision.
@@ -50,10 +50,21 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
   (`tests/fakes/fake_broker.py`, an `amqtt` broker — Docker is unavailable in this environment, so
   this is docs/10 §3.4's "fallback so the suite runs without Docker"). `bench_burst` (P4) and
   `bench_dedup` (P12) both meet budget.
+- **WP6** — `bus/ingress.py` (`Ingress.process_frame`: the docs/02 §4 hot path, fully synchronous
+  so it never blocks the WS reader on a slow MQTT publish (rule R1) — `kind: event` attributes are
+  handed off through a tracked fire-and-forget task instead of an inline await; `STATE`-kind
+  attributes go through `StateStore.apply()`'s existing change detection); `metrics.py` (`Metrics`:
+  `datapoints_in`/`unmapped_datapoints`/`events`/`codec_errors`, the docs/04 §4.2 `stats` counters
+  `Ingress` touches). `test_ws_reader_never_awaits_io` (P-25): a static AST check that the
+  frame-dispatch path contains no `await`, plus a load test proving ingestion keeps up even with
+  MQTT publishing artificially slowed. `bench_latency` (P1, P2) and `bench_ingest` (P3) both meet
+  budget, run against the real pipeline (fake SysAP, `WsReader`, `Ingress`, `StateStore`,
+  `Publisher`, a real `MqttClient`/broker) per docs/10 §7 — `bench_ingest`'s traffic window is 5 s,
+  not docs/05 §8's literal 60 s; see that section's footnote for why.
 
-Every module below WP5 is still a docstring-only stub.
-[`docs/11 WP6`](docs/11-implementation-plan.md#wp6--ingress-and-the-hot-path) (ingress and the hot
-path) is next.
+Every module below WP6 is still a docstring-only stub.
+[`docs/11 WP7`](docs/11-implementation-plan.md#wp7--commands-optimism-reconciliation) (commands,
+optimism, reconciliation) is next.
 
 ---
 

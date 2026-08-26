@@ -3,7 +3,7 @@
 A high-performance bridge between an **ABB / Busch-Jaeger free@home** System Access Point (SysAP)
 and **MQTT**.
 
-> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP5](docs/11-implementation-plan.md#wp5--mqtt-layer)
+> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP6](docs/11-implementation-plan.md#wp6--ingress-and-the-hot-path)
 > landed.** Bootstrap tooling, the generated pairing/function/parameter/interface code tables, the
 > SysAP settings pre-flight, the capture tool's pseudonymisation, the `minimal`/`typical`/`nasty`
 > configuration fixtures, a real SysAP client (`RestClient`, `WsReader` against a from-scratch fake
@@ -12,14 +12,17 @@ and **MQTT**.
 > pure `compile()`), a real tier-1 profile set — 13 profiles covering switches, dimmers,
 > colour-temperature lighting, covers (plain and slatted), climate, and the common sensor types,
 > each with a round-trip fixture, plus the `room_temperature_controller`/`cover_with_slats`
-> transforms — and now real MQTT connectivity: `MqttClient` (LWT, narrow ADR-006 subscriptions,
+> transforms — real MQTT connectivity: `MqttClient` (LWT, narrow ADR-006 subscriptions,
 > backoff+jitter reconnect that never gives up, retained republish after reconnect), the
 > coalescing state-publish loop (`StateStore` + `Publisher`, docs/05 §4.1), and the non-coalescing
-> event path for buttons/triggers, all tested against a real in-process broker rather than a mock.
-> 100% of the `typical.json` fixture's channels match a profile (floor: 85%). The documents under
-> [`docs/`](docs/) are written to be executed by an implementing agent (human or AI) top to bottom,
-> and [WP6](docs/11-implementation-plan.md#wp6--ingress-and-the-hot-path) (ingress and the hot
-> path) is next.
+> event path for buttons/triggers, all tested against a real in-process broker rather than a mock —
+> and now the ingest hot path itself: `Ingress` (docs/02 §4), fully synchronous end to end so a slow
+> MQTT publish can never block the WebSocket reader (rule R1), plus `metrics.py`'s counters. 100% of
+> the `typical.json` fixture's channels match a profile (floor: 85%); `bench_latency`/`bench_ingest`
+> both meet their P1/P2/P3 budgets against the real pipeline. The documents under [`docs/`](docs/)
+> are written to be executed by an implementing agent (human or AI) top to bottom, and
+> [WP7](docs/11-implementation-plan.md#wp7--commands-optimism-reconciliation) (commands, optimism,
+> reconciliation) is next.
 
 ---
 

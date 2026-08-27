@@ -3,7 +3,7 @@
 A high-performance bridge between an **ABB / Busch-Jaeger free@home** System Access Point (SysAP)
 and **MQTT**.
 
-> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP8](docs/11-implementation-plan.md#wp8--supervisor-lifecycle-resilience)
+> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP9](docs/11-implementation-plan.md#wp9--bridge-api-and-configuration)
 > landed.** Bootstrap tooling, the generated pairing/function/parameter/interface code tables, the
 > SysAP settings pre-flight, the capture tool's pseudonymisation, the `minimal`/`typical`/`nasty`
 > configuration fixtures, a real SysAP client (`RestClient`, `WsReader` against a from-scratch fake
@@ -33,10 +33,20 @@ and **MQTT**.
 > end-to-end health signal plus per-device `unresponsive`/`defect`), and `EntitiesStore`
 > (versioned, atomically-written `entities.json`). 100% of the `typical.json` fixture's channels
 > match a profile (floor: 85%); `bench_latency`/`bench_ingest`/`bench_command_debounce`/
-> `bench_resync` all meet their P1–P8 budgets against the real pipeline. The documents under
+> `bench_resync` all meet their P1–P8 budgets against the real pipeline — and now the bridge API and
+> configuration layer: `BridgeApi` (every `bridge/request/*` command in docs/04 §5 — `reload`,
+> `restart`, the ADR-010 `entity/rename` transaction, `entity/options`/`entity/remove` (a durable
+> exclusion that reuses the already-tested removed-entity retraction path), `device/refresh`,
+> `discovery/republish`, `log_level`, `health`, and `virtualdevice/create` with P-16's `ttl/2`
+> keepalive), `log.py` (central secret redaction shared by the console output and a rate-limited
+> `bridge/logging` MQTT sink, P-44/P-45), `settings.py` (the full `config.yaml` schema as pydantic
+> models, `FAH2MQTT_*` environment overrides, `!env`/`!secret`/`!file` YAML tags, and every docs/07
+> §2.2 semantic check), `sysap/mdns.py` (zeroconf discovery of the SysAP, tested against a real
+> loopback multicast round trip), and `cli.py` (`--check-config`, `--discover`, `--capture`, and a
+> `--dry-run` that connects, fetches, and compiles without ever touching MQTT). The documents under
 > [`docs/`](docs/) are written to be executed by an implementing agent (human or AI) top to bottom,
-> and [WP9](docs/11-implementation-plan.md#wp9--bridge-api-and-configuration) (bridge API,
-> settings, logging, CLI) is next.
+> and [WP10](docs/11-implementation-plan.md#wp10--home-assistant-discovery) (Home Assistant
+> discovery) is next.
 
 ---
 

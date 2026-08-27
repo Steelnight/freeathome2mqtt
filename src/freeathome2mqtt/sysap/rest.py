@@ -191,6 +191,32 @@ class RestClient:
         body = await self._request("GET", "/fhapi/v1/api/rest/configuration")
         return self._unwrap(body)
 
+    async def get_device(self, serial: str) -> dict[str, Any]:
+        """``GET /api/rest/device/{sysap}/{serial}`` -- one device's full record (docs/01 §2),
+        used for a targeted `bridge/request/device/refresh`.
+        """
+        path = f"/fhapi/v1/api/rest/device/{self._require_sysap_uuid()}/{serial}"
+        payload = self._unwrap(await self._request("GET", path))
+        device = payload.get(serial)
+        if not isinstance(device, dict):
+            raise SysApError(f"malformed device response for {serial}: {payload!r}")
+        return device
+
+    async def create_virtual_device(
+        self, serial: str, *, type_: str, ttl: int, **properties: Any
+    ) -> None:
+        """``PUT /api/rest/virtualdevice/{sysap}/{serial}`` -- create or refresh a virtual device
+        (docs/01 §4.5). `ttl` is seconds (`-1`/`0` = no expiry, else `180..86400`), sent as a
+        string like most properties -- but not all of them are strings (`capabilities` is an
+        array, docs/01 §4.5's example), so `properties` stays `Any` rather than `str`.
+        """
+        path = f"/fhapi/v1/api/rest/virtualdevice/{self._require_sysap_uuid()}/{serial}"
+        body = {"type": type_, "properties": {"ttl": str(ttl), **properties}}
+        payload = self._unwrap(await self._request("PUT", path, json=body))
+        result = payload.get("result")
+        if not isinstance(result, str) or result.lower() != "ok":
+            raise CommandFailedError(f"virtual device create/refresh for {serial}: {result!r}")
+
     async def get_datapoint(self, address: str) -> str:
         """``GET /api/rest/datapoint/{sysap}/{address}``; `address` is ``serial.channel.dp``."""
         path = f"/fhapi/v1/api/rest/datapoint/{self._require_sysap_uuid()}/{address}"

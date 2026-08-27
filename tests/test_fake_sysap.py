@@ -168,6 +168,41 @@ async def test_put_datapoint_write_result_is_configurable() -> None:
         assert body[fake.sysap_uuid]["result"] == "FAILED"
 
 
+async def test_get_device_returns_the_single_device_record() -> None:
+    async with running_fake_sysap(FakeSysAp(configuration=SAMPLE_CONFIG)) as (fake, client):
+        path = f"/fhapi/v1/api/rest/device/{fake.sysap_uuid}/{SERIAL}"
+        resp = await client.get(path)
+        body = await resp.json()
+        assert body[fake.sysap_uuid][SERIAL]["displayName"] == "Ceiling Light"
+
+
+async def test_get_device_404s_for_an_unknown_serial() -> None:
+    async with running_fake_sysap(FakeSysAp(configuration=SAMPLE_CONFIG)) as (fake, client):
+        path = f"/fhapi/v1/api/rest/device/{fake.sysap_uuid}/does-not-exist"
+        resp = await client.get(path)
+        assert resp.status == 404
+
+
+async def test_put_virtualdevice_is_recorded_and_reports_result() -> None:
+    async with running_fake_sysap(FakeSysAp(configuration=SAMPLE_CONFIG)) as (fake, client):
+        path = f"/fhapi/v1/api/rest/virtualdevice/{fake.sysap_uuid}/6000AABBCC"
+        body = {"type": "SwitchingActuator", "properties": {"ttl": "180"}}
+        resp = await client.put(path, json=body)
+        resp_body = await resp.json()
+        assert resp_body[fake.sysap_uuid]["result"] == "OK"
+        assert fake.virtual_device_put_count("6000AABBCC") == 1
+        assert fake.last_virtual_device_put("6000AABBCC") == body
+
+
+async def test_put_virtualdevice_tracks_repeated_keepalive_puts() -> None:
+    async with running_fake_sysap(FakeSysAp(configuration=SAMPLE_CONFIG)) as (fake, client):
+        path = f"/fhapi/v1/api/rest/virtualdevice/{fake.sysap_uuid}/6000AABBCC"
+        body = {"type": "SwitchingActuator", "properties": {"ttl": "180"}}
+        await client.put(path, json=body)
+        await client.put(path, json=body)
+        assert fake.virtual_device_put_count("6000AABBCC") == 2
+
+
 async def test_ws_push_frame_is_received_by_client() -> None:
     async with (
         running_fake_sysap(FakeSysAp(configuration=SAMPLE_CONFIG)) as (fake, client),

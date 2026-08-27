@@ -361,6 +361,21 @@ def test_compile_includes_virtual_devices_when_opted_in() -> None:
     assert len(model.entities) == 1
 
 
+def test_compile_excludes_entity_ids_in_excluded_entity_ids() -> None:
+    """entity/remove and entity/options {"enabled": false} (docs/04 §5, docs/11 WP9) flow into
+    `excluded_entity_ids`, symmetric with `aliases` -- the entity simply never exists in the next
+    compiled `Model`, so the ordinary removed-entity retraction path (P-35) handles the rest.
+    """
+    config = _config({"ABB700990001": _device({"ch0000": _switch_channel()})})
+    model = compile(
+        config,
+        _switch_registry(),
+        CompileOptions(excluded_entity_ids=frozenset({"ABB700990001_ch0000"})),
+    )
+    assert model.entities == ()
+    assert model.stats.channels_excluded_by_option == 1
+
+
 def test_compile_includes_undefined_interface_by_default() -> None:
     device = _device({"ch0000": _switch_channel()})
     del device["interface"]

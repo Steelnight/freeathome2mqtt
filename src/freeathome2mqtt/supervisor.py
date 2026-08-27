@@ -23,8 +23,10 @@ shape down).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import hashlib
+import importlib.metadata
 import logging
 import random
 import ssl as ssl_module
@@ -38,6 +40,7 @@ import aiohttp
 import aiomqtt
 import orjson
 
+from freeathome2mqtt import log
 from freeathome2mqtt.availability import BridgeAvailability, DeviceAvailabilityPublisher
 from freeathome2mqtt.bus.commands import CommandDispatcher
 from freeathome2mqtt.bus.events import EventPublisher
@@ -50,17 +53,24 @@ from freeathome2mqtt.model.compiler import CompileOptions, Model
 from freeathome2mqtt.model.compiler import compile as compile_model
 from freeathome2mqtt.model.entity import Entity
 from freeathome2mqtt.model.profiles import ProfileRegistry
+from freeathome2mqtt.mqtt import topics
+from freeathome2mqtt.mqtt.bridge_api import BridgeApi, BridgeApiError, Handler
 from freeathome2mqtt.mqtt.client import MqttClient, MqttClientNotConnectedError
 from freeathome2mqtt.persistence import EntitiesStore
 from freeathome2mqtt.sysap.rest import (
     AuthenticationError,
     BadRequestError,
     ForbiddenError,
+    NotFoundError,
     RestClient,
     SysApError,
 )
 from freeathome2mqtt.sysap.schema import Configuration, WsFrameBody
-from freeathome2mqtt.sysap.settings_probe import check_version_supported, fetch_settings
+from freeathome2mqtt.sysap.settings_probe import (
+    SysApSettings,
+    check_version_supported,
+    fetch_settings,
+)
 from freeathome2mqtt.sysap.ws import WsReader
 
 logger = logging.getLogger(__name__)
@@ -81,6 +91,10 @@ _STARTUP_POLL_INTERVAL_S = 0.01
 
 _TOPOLOGY_KEYS = ("devices", "devicesAdded", "devicesRemoved", "parameters")
 
+# docs/01 §4.5: a virtual device with one of these TTLs never expires, so it needs no keepalive.
+_VIRTUAL_DEVICE_NO_EXPIRY = frozenset({-1, 0})
+_VIRTUAL_DEVICE_RESERVED_KEYS = frozenset({"serial", "type", "ttl", "transaction"})
+
 # Named tuples, not inline tuple literals, per sysap/rest.py's own convention: Python 3.14's
 # grammar allows `except A, B:` without parentheses (PEP 758), which `ruff format` then prefers --
 # but a bare comma there reads exactly like the dead Python 2 idiom. A single name sidesteps it.
@@ -100,6 +114,17 @@ def _backoff_delay(attempt: int, *, initial: float, factor: float, cap: float) -
 
 def _hash_config(config: Configuration) -> bytes:
     return hashlib.sha256(orjson.dumps(config, option=orjson.OPT_SORT_KEYS)).digest()
+
+
+def _package_version() -> str:
+    try:
+        return importlib.metadata.version("freeathome2mqtt")
+    except importlib.metadata.PackageNotFoundError:
+        return "0.0.0-dev"
+
+
+def _connected_or_not(connected: bool) -> str:
+    return "connected" if connected else "disconnected"
 
 
 async def _wait_until(predicate: Callable[[], bool]) -> None:
@@ -267,6 +292,11 @@ class Supervisor:
         self._rest: RestClient | None = None
         self._ws: WsReader | None = None
         self._availability: BridgeAvailability | None = None
+        self._bridge_api: BridgeApi | None = None
+        self.restart_requested = False
+        self._sysap_settings: SysApSettings | None = None
+        self._started_at: float | None = None
+        self._virtual_device_tasks: dict[str, asyncio.Task[None]] = {}
 
         self._cold_start_done = False
         self._last_config_hash: bytes | None = None
@@ -297,6 +327,31 @@ class Supervisor:
         """Request a graceful shutdown (docs/08 §10); `run()` returns once it completes."""
         self._shutdown_event.set()
 
+    async def dry_run(self) -> Model:
+        """docs/07 §3 `--dry-run`: probe, fetch, compile -- and nothing else. Never constructs
+        `MqttClient` or `WsReader`, so "publishes nothing" is guaranteed by construction rather
+        than by a flag threaded through the normal startup path.
+        """
+        self._entities_store.load()
+        settings = await fetch_settings(self._http_session, self._config.sysap_base_url)
+        check_version_supported(settings.version)
+        self._sysap_settings = settings
+
+        rest = RestClient(
+            base_url=self._config.sysap_base_url,
+            username=self._config.sysap_username,
+            password=self._config.sysap_password,
+            session=self._http_session,
+            ssl=self._config.sysap_ssl,
+            max_inflight=self._config.sysap_max_inflight,
+        )
+        self._rest = rest
+
+        config = await self._fetch_configuration_with_retry()
+        model = compile_model(config, self._profiles, self._effective_compile_options())
+        self._model = model
+        return model
+
     def _spawn_supervised(
         self, name: str, factory: Callable[[], Awaitable[None]]
     ) -> asyncio.Task[None]:
@@ -320,10 +375,12 @@ class Supervisor:
     # --------------------------------------------------------------------------------- startup
 
     async def _startup(self) -> None:
+        self._started_at = time.monotonic()
         self._entities_store.load()
 
         settings = await fetch_settings(self._http_session, self._config.sysap_base_url)
         check_version_supported(settings.version)
+        self._sysap_settings = settings
 
         mqtt = MqttClient(
             host=self._config.mqtt_host,
@@ -342,6 +399,12 @@ class Supervisor:
             on_disconnected=self._on_mqtt_disconnected,
         )
         self._mqtt = mqtt
+        # Handlers are bound methods closing over `self`, so they always see whatever `_model`/
+        # `_rest`/etc. currently are -- constructed once here, never rebuilt on resync, unlike
+        # `_commands` below (docs/04 §5).
+        self._bridge_api = BridgeApi(
+            base_topic=self._config.base_topic, mqtt=mqtt, handlers=self._bridge_api_handlers()
+        )
         availability = BridgeAvailability(
             mqtt=mqtt, base_topic=self._config.base_topic, grace_seconds=self._config.grace_seconds
         )
@@ -427,8 +490,16 @@ class Supervisor:
             for entity_id, record in self._entities_store.entities.items()
             if record.alias is not None
         }
+        excluded_entity_ids = frozenset(
+            entity_id
+            for entity_id, record in self._entities_store.entities.items()
+            if record.options.get("enabled") is False
+        )
         return dataclasses.replace(
-            self._config.compile_options, topic_prefix=self._config.base_topic, aliases=aliases
+            self._config.compile_options,
+            topic_prefix=self._config.base_topic,
+            aliases=aliases,
+            excluded_entity_ids=excluded_entity_ids,
         )
 
     async def _fetch_configuration_with_retry(self) -> Configuration:
@@ -520,6 +591,8 @@ class Supervisor:
     def _on_mqtt_message(self, message: aiomqtt.Message) -> None:
         if self._commands is not None:
             self._commands.on_message(message)
+        if self._bridge_api is not None:
+            self._bridge_api.on_message(message)
 
     async def _on_mqtt_reconnected(self) -> None:
         """docs/08 §9: republish the accumulated dirty batch and flip `bridge/state` back online
@@ -625,6 +698,329 @@ class Supervisor:
                 continue
             await self._resync(config)
 
+    # ---------------------------------------------------------------------------- bridge API (WP9)
+
+    def _bridge_api_handlers(self) -> dict[str, Handler]:
+        """The docs/04 §5 command table -- bound methods, not a lookup by arbitrary string
+        (CLAUDE.md rule 8): every key here is a name docs/04 §5 documents, closed and reviewed.
+        """
+        return {
+            "reload": self._handle_reload,
+            "restart": self._handle_restart,
+            "entity/rename": self._handle_entity_rename,
+            "entity/options": self._handle_entity_options,
+            "entity/remove": self._handle_entity_remove,
+            "device/refresh": self._handle_device_refresh,
+            "discovery/republish": self._handle_discovery_republish,
+            "log_level": self._handle_log_level,
+            "health": self._handle_health,
+            "virtualdevice/create": self._handle_virtualdevice_create,
+        }
+
+    async def _handle_reload(self, _args: dict[str, Any]) -> dict[str, Any]:
+        """docs/04 §5 `reload`: re-fetch config, recompile, diff, publish deltas -- reuses the
+        same debounced path a topology frame or a WS reconnect already goes through (P-55), so a
+        burst of reload requests still collapses to one resync.
+        """
+        self._reload_debouncer.request()
+        return {}
+
+    async def _handle_restart(self, _args: dict[str, Any]) -> dict[str, Any]:
+        """docs/04 §5 `restart`: graceful shutdown, then exit non-zero so the process supervisor
+        (systemd/Docker) restarts us -- `run()`'s own shutdown sequence does the graceful part;
+        this only flags the reason and asks for it, mirroring `stop()`.
+        """
+        self.restart_requested = True
+        self._shutdown_event.set()
+        return {}
+
+    async def _handle_entity_rename(self, args: dict[str, Any]) -> dict[str, Any]:
+        """docs/04 §5 `entity/rename`: the ADR-010 transaction -- clear every old retained topic,
+        persist the alias, recompile so the new topic takes effect, force a republish under it
+        (a rename usually doesn't change the *value*, so the ordinary diff-by-value resync would
+        never republish it on its own), then emit `bridge/event`. Discovery republishing under
+        the new topic is deferred to WP10 alongside HA discovery generation itself -- `_resync()`
+        already never republishes discovery on any trigger, since `model.discovery` is always
+        empty until then.
+        """
+        entity_id = args.get("id")
+        new_name = args.get("name")
+        if not isinstance(entity_id, str) or not entity_id:
+            raise BridgeApiError("entity/rename requires a non-empty 'id'")
+        if not isinstance(new_name, str) or not new_name:
+            raise BridgeApiError("entity/rename requires a non-empty 'name'")
+
+        model, mqtt = self._model, self._mqtt
+        if model is None or mqtt is None:
+            raise BridgeApiError("bridge is not ready yet")
+        old_idx = model.by_id.get(entity_id)
+        if old_idx is None:
+            raise BridgeApiError(f"unknown entity id: {entity_id!r}")
+        old_entity = model.entities[old_idx]
+
+        await self._retract_entity(mqtt, old_entity)
+        self._entities_store.set_alias(entity_id, new_name)
+        await self._resync()
+
+        new_model, new_state = self._model, self._state
+        new_topic = old_entity.state_topic
+        if new_model is not None and new_state is not None:
+            new_idx = new_model.by_id.get(entity_id)
+            if new_idx is not None:
+                new_topic = new_model.entities[new_idx].state_topic
+                new_state.dirty.add(new_idx)
+                await self._publisher_or_raise().flush()
+
+        await mqtt.publish(
+            topics.bridge_event_topic(self._config.base_topic),
+            orjson.dumps(
+                {
+                    "type": "entity_renamed",
+                    "id": entity_id,
+                    "from": old_entity.state_topic,
+                    "to": new_topic,
+                }
+            ),
+            qos=0,
+            retain=False,
+        )
+        return {"id": entity_id, "topic": new_topic}
+
+    async def _handle_entity_options(self, args: dict[str, Any]) -> dict[str, Any]:
+        """docs/04 §5 `entity/options`: persists overrides to `entities.json` (docs/07 §4.1).
+
+        `enabled` is the only override compilation itself acts on today (via
+        `CompileOptions.excluded_entity_ids`, symmetric with `aliases`) -- it triggers a debounced
+        resync so the change actually takes effect. `optimistic`/`debounce_ms`/`homeassistant`
+        round-trip through the store correctly but are not yet consulted anywhere at runtime; that
+        is a real, named gap (per-entity command/discovery overrides), not silently dropped --
+        `CommandDispatcher` and HA discovery (WP10) are both still installation-wide.
+        """
+        entity_id = args.get("id")
+        options = args.get("options")
+        if not isinstance(entity_id, str) or not entity_id:
+            raise BridgeApiError("entity/options requires a non-empty 'id'")
+        if not isinstance(options, dict):
+            raise BridgeApiError("entity/options requires an 'options' object")
+        self._entities_store.set_options(entity_id, options)
+        if "enabled" in options:
+            self._reload_debouncer.request()
+        return {"id": entity_id, "options": self._entities_store.options_for(entity_id)}
+
+    async def _handle_entity_remove(self, args: dict[str, Any]) -> dict[str, Any]:
+        """docs/04 §5 `entity/remove`: durably excludes the entity (`enabled: false`, the same
+        mechanism `entity/options` uses) and requests a resync -- the ordinary removed-entity
+        retraction path (P-35) then clears its retained topics exactly as it would for a device
+        that genuinely left the installation. A durable exclusion, kept until an explicit
+        `entity/options {"enabled": true}` brings it back, is deliberately chosen over a
+        record-pruning "until next reload" reading of docs/07 §4.1 -- pruning the persisted record
+        would erase the very marker that keeps the entity excluded, un-hiding it on the next
+        unrelated resync (a periodic refresh, a topology blip) instead of staying gone. Fixed in
+        that document in this commit, per CLAUDE.md §4.
+        """
+        entity_id = args.get("id")
+        if not isinstance(entity_id, str) or not entity_id:
+            raise BridgeApiError("entity/remove requires a non-empty 'id'")
+        self._entities_store.set_options(entity_id, {"enabled": False})
+        self._reload_debouncer.request()
+        return {"id": entity_id}
+
+    async def _handle_device_refresh(self, args: dict[str, Any]) -> dict[str, Any]:
+        """docs/04 §5 `device/refresh`: confirm the device exists with a targeted
+        `GET /api/rest/device/...`, then apply any change via the ordinary resync path rather than
+        a bespoke single-device merge -- docs/06 §4's resync is already cheap (one HTTP request,
+        P8's budget), so "refresh just this device" degrading to "resync everything, having first
+        confirmed this device is real" is a deliberate, documented simplification.
+        """
+        serial = args.get("serial")
+        if not isinstance(serial, str) or not serial:
+            raise BridgeApiError("device/refresh requires a non-empty 'serial'")
+        rest = self._rest
+        if rest is None:
+            raise BridgeApiError("bridge is not ready yet")
+        try:
+            await rest.get_device(serial)
+        except NotFoundError as exc:
+            raise BridgeApiError(f"unknown device serial: {serial!r}") from exc
+        self._reload_debouncer.request()
+        return {"serial": serial}
+
+    async def _handle_discovery_republish(self, _args: dict[str, Any]) -> dict[str, Any]:
+        """docs/04 §5 `discovery/republish`: force a full HA discovery republish. A no-op in
+        practice until WP10 populates `model.discovery` -- see `_publish_discovery`'s own
+        docstring -- but the command itself is wired now so nothing needs revisiting later.
+        """
+        model = self._model
+        if model is None:
+            raise BridgeApiError("bridge is not ready yet")
+        await self._publish_discovery(model)
+        return {}
+
+    async def _handle_log_level(self, args: dict[str, Any]) -> dict[str, Any]:
+        """docs/04 §5 `log_level`: change verbosity at runtime, no restart."""
+        level = args.get("level")
+        if not isinstance(level, str) or not level:
+            raise BridgeApiError("log_level requires a non-empty 'level'")
+        try:
+            log.set_level(level)
+        except ValueError as exc:
+            raise BridgeApiError(str(exc)) from exc
+        return {"level": level.lower()}
+
+    async def _handle_health(self, _args: dict[str, Any]) -> dict[str, Any]:
+        """docs/04 §5 `health`: the `bridge/info` body plus a pass/fail check list."""
+        availability = self._availability
+        checks = [
+            {
+                "name": "mqtt_connected",
+                "ok": availability.mqtt_connected if availability is not None else False,
+            },
+            {
+                "name": "sysap_connected",
+                "ok": availability.sysap_connected if availability is not None else False,
+            },
+            {
+                "name": "model_loaded",
+                "ok": availability.model_loaded if availability is not None else False,
+            },
+        ]
+        return {"info": self._build_bridge_info(), "checks": checks}
+
+    def _build_bridge_info(self) -> dict[str, Any]:
+        """`bridge/info` (docs/04 §4.2). A first cut: every field that already has a real source
+        (compile stats, availability, reconnect counters, `entities.json`-adjacent config) is
+        populated; `stats.commands`/`command_errors`/`state_publishes`/`latency_ms` have no
+        counter anywhere yet (`CommandDispatcher`/`Publisher` don't track them) and are a real,
+        named gap for a later WP, not silently fabricated.
+        """
+        availability = self._availability
+        model = self._model
+        settings = self._sysap_settings
+
+        counts: dict[str, int] = {}
+        if model is not None:
+            stats = model.stats
+            counts = {
+                "devices": stats.devices_total,
+                "channels": stats.channels_total,
+                "entities": stats.entities_created,
+                "unsupported_channels": stats.channels_unsupported,
+                "orphan_channels_skipped": stats.channels_orphaned,
+            }
+
+        sysap: dict[str, Any] = {"url": self._config.sysap_base_url}
+        if settings is not None:
+            sysap["name"] = settings.name
+            sysap["serial"] = settings.serial_number
+            sysap["version"] = settings.version
+        if self._rest is not None and self._rest.sysap_uuid is not None:
+            sysap["uuid"] = self._rest.sysap_uuid
+
+        stats_body: dict[str, Any] = {
+            "uptime_s": round(time.monotonic() - self._started_at, 1)
+            if self._started_at is not None
+            else 0.0,
+            "datapoints_in": self.metrics.datapoints_in,
+            "unmapped_datapoints": self.metrics.unmapped_datapoints,
+            "events": self.metrics.events,
+            "codec_errors": self.metrics.codec_errors,
+            "config_reloads": self.metrics.config_reloads,
+            "task_restarts": self.metrics.task_restarts,
+        }
+        if self._ws is not None:
+            stats_body["reconnects_ws"] = self._ws.reconnect_count
+        if self._mqtt is not None:
+            stats_body["reconnects_mqtt"] = self._mqtt.reconnect_count
+
+        return {
+            "version": _package_version(),
+            "sysap": sysap,
+            "links": {
+                "mqtt": _connected_or_not(availability is not None and availability.mqtt_connected),
+                "sysap_rest": "ok"
+                if self._rest is not None and self._rest.sysap_uuid is not None
+                else "unknown",
+                "sysap_ws": _connected_or_not(
+                    availability is not None and availability.sysap_connected
+                ),
+            },
+            "counts": counts,
+            "config": {
+                "base_topic": self._config.base_topic,
+                "topic_style": self._config.compile_options.topic_style,
+                "coalesce_ms": self._config.coalesce_ms,
+                "max_inflight": self._config.sysap_max_inflight,
+            },
+            "stats": stats_body,
+        }
+
+    async def _handle_virtualdevice_create(self, args: dict[str, Any]) -> dict[str, Any]:
+        """docs/04 §5 `virtualdevice/create`: create/refresh a virtual device (docs/01 §4.5).
+
+        A finite `ttl` gets a keepalive task re-`PUT`ting at `ttl / 2` (P-16) -- re-creating for an
+        already-running serial cancels and replaces its keepalive rather than stacking a second
+        one, matching "create/refresh" being the same operation either way.
+        """
+        serial = args.get("serial")
+        type_ = args.get("type")
+        ttl = args.get("ttl")
+        if not isinstance(serial, str) or not serial:
+            raise BridgeApiError("virtualdevice/create requires a non-empty 'serial'")
+        if not isinstance(type_, str) or not type_:
+            raise BridgeApiError("virtualdevice/create requires a non-empty 'type'")
+        if not isinstance(ttl, int) or isinstance(ttl, bool):
+            raise BridgeApiError("virtualdevice/create requires an integer 'ttl'")
+        rest = self._rest
+        if rest is None:
+            raise BridgeApiError("bridge is not ready yet")
+
+        properties = {k: v for k, v in args.items() if k not in _VIRTUAL_DEVICE_RESERVED_KEYS}
+        await rest.create_virtual_device(serial, type_=type_, ttl=ttl, **properties)
+        self._start_virtual_device_keepalive(serial, type_=type_, ttl=ttl, properties=properties)
+        return {"serial": serial}
+
+    def _start_virtual_device_keepalive(
+        self, serial: str, *, type_: str, ttl: int, properties: dict[str, Any]
+    ) -> None:
+        self._cancel_virtual_device_keepalive(serial)
+        if ttl in _VIRTUAL_DEVICE_NO_EXPIRY:
+            return
+        task = asyncio.create_task(
+            self._virtual_device_keepalive_loop(serial, type_=type_, ttl=ttl, properties=properties)
+        )
+        self._virtual_device_tasks[serial] = task
+        task.add_done_callback(
+            lambda t: self._log_background_result(t, f"virtualdevice_keepalive[{serial}]")
+        )
+
+    def _cancel_virtual_device_keepalive(self, serial: str) -> None:
+        task = self._virtual_device_tasks.pop(serial, None)
+        if task is not None:
+            task.cancel()
+
+    async def _virtual_device_keepalive_loop(
+        self, serial: str, *, type_: str, ttl: int, properties: dict[str, Any]
+    ) -> None:
+        interval = ttl / 2
+        with contextlib.suppress(asyncio.CancelledError):
+            while True:
+                await asyncio.sleep(interval)
+                rest = self._rest
+                if rest is None:
+                    return
+                await rest.create_virtual_device(serial, type_=type_, ttl=ttl, **properties)
+
+    async def _stop_virtual_device_keepalives(self) -> None:
+        """docs/01 §4.5, P-16: stopped cleanly on shutdown -- part of docs/08 §10's connection
+        teardown, not left to expire on the SysAP on their own.
+        """
+        tasks = list(self._virtual_device_tasks.values())
+        self._virtual_device_tasks.clear()
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     # -------------------------------------------------------------------------------- shutdown
 
     async def _graceful_shutdown(self) -> None:
@@ -635,6 +1031,7 @@ class Supervisor:
         shutdown into a crash: these final publishes are best-effort (there's nobody to receive
         them if MQTT isn't there), so `MqttClientNotConnectedError` here is logged, not fatal.
         """
+        await self._stop_virtual_device_keepalives()
         if self._commands is not None:
             self._commands.stop_accepting()
             await self._commands.flush_pending(deadline_s=2.0)

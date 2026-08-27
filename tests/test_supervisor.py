@@ -5,7 +5,9 @@ docs/02 §3, §7-8; docs/06 §3-4; docs/11 WP8).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -21,6 +23,7 @@ from freeathome2mqtt.metrics import Metrics
 from freeathome2mqtt.model.compiler import CompileStats, Model
 from freeathome2mqtt.model.entity import AttrKind, Entity
 from freeathome2mqtt.model.profiles import load_profile_registry
+from freeathome2mqtt.mqtt.bridge_api import BridgeApiError
 from freeathome2mqtt.supervisor import (
     _ESCALATION_THRESHOLD,
     Supervisor,
@@ -1019,3 +1022,780 @@ async def test_config_refresh_loop_resyncs_only_when_the_hash_changed(tmp_path: 
         finally:
             await supervisor.stop()
             await asyncio.wait_for(task, timeout=5.0)
+
+
+# ---------------------------------------------------------------------------------- bridge API
+
+
+async def test_reload_debounce_and_rate_limit(tmp_path: Path) -> None:
+    """docs/04 §5 `reload` reuses `_ReloadDebouncer` (P-55): a burst of requests over the broker
+    coalesces into at most one *more* resync than the debouncer's own coalescing already allows
+    (`test_reload_debouncer_coalesces_a_repeat_request_into_one_more_resync`) -- never one resync
+    per request, which is what "no debouncing at all" would look like.
+    """
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            reloads_before = supervisor.metrics.config_reloads
+            requests_sent = 5
+
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as sender:
+                for _ in range(requests_sent):
+                    await sender.publish(f"{BASE}/bridge/request/reload", b"{}")
+
+            await _wait_until(
+                lambda: supervisor.metrics.config_reloads > reloads_before, timeout_seconds=5.0
+            )
+            await asyncio.sleep(0.3)  # a wrongly-repeating resync would keep firing past here
+            reloads = supervisor.metrics.config_reloads - reloads_before
+            assert 1 <= reloads <= 2  # one debounce window, plus at most one coalesced repeat
+            assert reloads < requests_sent
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_reload_command_requests_a_debounced_resync(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        calls = 0
+
+        def _record() -> None:
+            nonlocal calls
+            calls += 1
+
+        supervisor._reload_debouncer.request = _record  # type: ignore[method-assign]
+        data = await supervisor._handle_reload({})
+        assert data == {}
+        assert calls == 1
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_restart_command_sets_restart_requested_and_triggers_shutdown(
+    tmp_path: Path,
+) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        assert supervisor.restart_requested is False
+        data = await supervisor._handle_restart({})
+        assert data == {}
+        assert supervisor.restart_requested is True
+        assert supervisor._shutdown_event.is_set()
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_restart_via_mqtt_makes_run_return_with_restart_requested(tmp_path: Path) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as sender:
+                await sender.publish(f"{BASE}/bridge/request/restart", b"{}")
+            await asyncio.wait_for(task, timeout=5.0)
+            assert supervisor.restart_requested is True
+        finally:
+            if not task.done():
+                await supervisor.stop()
+                await asyncio.wait_for(task, timeout=5.0)
+
+
+# ------------------------------------------------------------------------------- entity/rename
+
+
+async def test_rename_clears_old_retained_topics(tmp_path: Path) -> None:
+    """ADR-010's four-step transaction: clear the old retained topics, persist the alias,
+    republish under the new topic, emit `bridge/event`.
+    """
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            entity_id = f"{SERIAL}_ch0000"
+            old_topic = f"{BASE}/switch"
+            new_topic = f"{BASE}/kitchen_light"
+            event_topic = f"{BASE}/bridge/event"
+
+            seen: dict[str, bytes] = {}
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as observer:
+                await observer.subscribe(f"{BASE}/#")
+
+                async def _collect() -> None:
+                    async for message in observer.messages:
+                        seen[str(message.topic)] = message.payload
+
+                collector = asyncio.create_task(_collect())
+                try:
+                    # The initial retained flood for the pre-rename topic must land before the
+                    # rename request is sent, or its empty retract could be mistaken for it.
+                    await _wait_until(lambda: old_topic in seen)
+
+                    async with aiomqtt.Client("127.0.0.1", port=broker.port) as sender:
+                        await sender.publish(
+                            f"{BASE}/bridge/request/entity/rename",
+                            orjson.dumps({"id": entity_id, "name": "Kitchen Light"}),
+                        )
+
+                    # `bridge/event` is published last in the handler's sequence, so by the time
+                    # it arrives the retract and the new-topic publish (same connection, ordered)
+                    # are guaranteed to have already landed.
+                    await _wait_until(lambda: event_topic in seen, timeout_seconds=5.0)
+                finally:
+                    collector.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await collector
+
+            assert seen[old_topic] == b""
+            assert new_topic in seen and seen[new_topic] != b""
+            event = orjson.loads(seen[event_topic])
+            assert event == {
+                "type": "entity_renamed",
+                "id": entity_id,
+                "from": old_topic,
+                "to": new_topic,
+            }
+            assert supervisor._entities_store.alias_for(entity_id) == "Kitchen Light"
+            assert supervisor._model is not None
+            assert supervisor._model.entities[supervisor._model.by_id[entity_id]].state_topic == (
+                new_topic
+            )
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_rename_response_is_an_error_for_an_unknown_entity(tmp_path: Path) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as observer:
+                await observer.subscribe(f"{BASE}/bridge/response/#")
+                async with aiomqtt.Client("127.0.0.1", port=broker.port) as sender:
+                    await sender.publish(
+                        f"{BASE}/bridge/request/entity/rename",
+                        orjson.dumps({"id": "no-such-entity", "name": "x"}),
+                    )
+                async with asyncio.timeout(5.0):
+                    async for message in observer.messages:
+                        response = orjson.loads(message.payload)
+                        break
+            assert response["status"] == "error"
+            assert "no-such-entity" in response["error"]
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_rename_requires_id_and_name(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        with pytest.raises(BridgeApiError, match="requires a non-empty 'id'"):
+            await supervisor._handle_entity_rename({"name": "x"})
+        with pytest.raises(BridgeApiError, match="requires a non-empty 'name'"):
+            await supervisor._handle_entity_rename({"id": "x"})
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_rename_before_startup_raises(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        with pytest.raises(BridgeApiError, match="not ready"):
+            await supervisor._handle_entity_rename({"id": "x", "name": "y"})
+    finally:
+        await supervisor._http_session.close()
+
+
+# ------------------------------------------------------------------ entity/options, entity/remove
+
+
+def _stub_reload_requests(supervisor: Supervisor) -> list[None]:
+    calls: list[None] = []
+    supervisor._reload_debouncer.request = lambda: calls.append(None)  # type: ignore[method-assign]
+    return calls
+
+
+async def test_entity_options_persists_and_resyncs_on_enabled_change(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        calls = _stub_reload_requests(supervisor)
+        data = await supervisor._handle_entity_options(
+            {"id": "ABB_ch0001", "options": {"enabled": False}}
+        )
+        assert data == {"id": "ABB_ch0001", "options": {"enabled": False}}
+        assert supervisor._entities_store.options_for("ABB_ch0001") == {"enabled": False}
+        assert calls == [None]
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_entity_options_does_not_resync_for_non_enabled_keys(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        calls = _stub_reload_requests(supervisor)
+        await supervisor._handle_entity_options(
+            {"id": "ABB_ch0001", "options": {"debounce_ms": 100}}
+        )
+        assert supervisor._entities_store.options_for("ABB_ch0001") == {"debounce_ms": 100}
+        assert calls == []
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_entity_options_merges_across_calls(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        _stub_reload_requests(supervisor)
+        await supervisor._handle_entity_options(
+            {"id": "ABB_ch0001", "options": {"optimistic": False}}
+        )
+        await supervisor._handle_entity_options(
+            {"id": "ABB_ch0001", "options": {"debounce_ms": 50}}
+        )
+        assert supervisor._entities_store.options_for("ABB_ch0001") == {
+            "optimistic": False,
+            "debounce_ms": 50,
+        }
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_entity_options_requires_id_and_an_options_object(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        with pytest.raises(BridgeApiError, match="requires a non-empty 'id'"):
+            await supervisor._handle_entity_options({"options": {}})
+        with pytest.raises(BridgeApiError, match="requires an 'options' object"):
+            await supervisor._handle_entity_options({"id": "x", "options": "not-a-dict"})
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_entity_remove_marks_disabled_and_requests_resync(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        calls = _stub_reload_requests(supervisor)
+        data = await supervisor._handle_entity_remove({"id": "ABB_ch0001"})
+        assert data == {"id": "ABB_ch0001"}
+        assert supervisor._entities_store.options_for("ABB_ch0001") == {"enabled": False}
+        assert calls == [None]
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_entity_remove_requires_id(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        with pytest.raises(BridgeApiError, match="requires a non-empty 'id'"):
+            await supervisor._handle_entity_remove({})
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_entity_remove_retracts_the_entity_end_to_end(tmp_path: Path) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            entity_id = f"{SERIAL}_ch0000"
+            topic = f"{BASE}/switch"
+            reloads_before = supervisor.metrics.config_reloads
+
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as observer:
+                await observer.subscribe(topic)
+
+                async def _wait_for_empty_payload() -> None:
+                    async for message in observer.messages:
+                        if message.payload == b"":
+                            return
+
+                waiter = asyncio.create_task(_wait_for_empty_payload())
+                async with aiomqtt.Client("127.0.0.1", port=broker.port) as sender:
+                    await sender.publish(
+                        f"{BASE}/bridge/request/entity/remove",
+                        orjson.dumps({"id": entity_id}),
+                    )
+                await asyncio.wait_for(waiter, timeout=5.0)
+
+            await _wait_until(
+                lambda: supervisor.metrics.config_reloads > reloads_before, timeout_seconds=5.0
+            )
+            assert supervisor._model is not None
+            assert entity_id not in supervisor._model.by_id
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+# ----------------------------------------------------------- device/refresh, discovery/republish
+
+
+async def test_device_refresh_requires_serial(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        with pytest.raises(BridgeApiError, match="requires a non-empty 'serial'"):
+            await supervisor._handle_device_refresh({})
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_device_refresh_before_startup_raises(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        with pytest.raises(BridgeApiError, match="not ready"):
+            await supervisor._handle_device_refresh({"serial": SERIAL})
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_device_refresh_unknown_serial_raises(tmp_path: Path) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            with pytest.raises(BridgeApiError, match="unknown device serial"):
+                await supervisor._handle_device_refresh({"serial": "does-not-exist"})
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_device_refresh_known_serial_triggers_a_resync(tmp_path: Path) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            device_path = f"/fhapi/v1/api/rest/device/{fake.sysap_uuid}/{SERIAL}"
+            requests_before = fake.request_count(device_path)
+            reloads_before = supervisor.metrics.config_reloads
+
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as sender:
+                await sender.publish(
+                    f"{BASE}/bridge/request/device/refresh", orjson.dumps({"serial": SERIAL})
+                )
+
+            await _wait_until(
+                lambda: supervisor.metrics.config_reloads > reloads_before, timeout_seconds=5.0
+            )
+            assert fake.request_count(device_path) == requests_before + 1
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_discovery_republish_before_startup_raises(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        with pytest.raises(BridgeApiError, match="not ready"):
+            await supervisor._handle_discovery_republish({})
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_discovery_republish_succeeds_once_started(tmp_path: Path) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            data = await supervisor._handle_discovery_republish({})
+            assert data == {}
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+# ------------------------------------------------------------ log_level, health, bridge_info
+
+
+async def test_log_level_changes_the_root_logger_level(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    original = logging.getLogger().level
+    try:
+        data = await supervisor._handle_log_level({"level": "DEBUG"})
+        assert data == {"level": "debug"}
+        assert logging.getLogger().level == logging.DEBUG
+    finally:
+        logging.getLogger().setLevel(original)
+        await supervisor._http_session.close()
+
+
+async def test_log_level_requires_a_value(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        with pytest.raises(BridgeApiError, match="requires a non-empty 'level'"):
+            await supervisor._handle_log_level({})
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_log_level_rejects_an_unknown_level(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        with pytest.raises(BridgeApiError, match="unknown log level"):
+            await supervisor._handle_log_level({"level": "verbose"})
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_health_reports_all_checks_ok_once_started(tmp_path: Path) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            data = await supervisor._handle_health({})
+            assert {c["name"]: c["ok"] for c in data["checks"]} == {
+                "mqtt_connected": True,
+                "sysap_connected": True,
+                "model_loaded": True,
+            }
+            info = data["info"]
+            assert info["links"] == {
+                "mqtt": "connected",
+                "sysap_rest": "ok",
+                "sysap_ws": "connected",
+            }
+            assert info["counts"]["entities"] == 1
+            assert info["counts"]["devices"] == 1
+            assert info["sysap"]["uuid"] == fake.sysap_uuid
+            assert info["config"]["base_topic"] == BASE
+            assert info["stats"]["config_reloads"] == 0
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_health_before_startup_reports_everything_down(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        data = await supervisor._handle_health({})
+        assert {c["name"]: c["ok"] for c in data["checks"]} == {
+            "mqtt_connected": False,
+            "sysap_connected": False,
+            "model_loaded": False,
+        }
+        assert data["info"]["counts"] == {}
+        assert data["info"]["links"] == {
+            "mqtt": "disconnected",
+            "sysap_rest": "unknown",
+            "sysap_ws": "disconnected",
+        }
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_bridge_info_never_contains_sysap_or_mqtt_secrets(tmp_path: Path) -> None:
+    """The bridge_info half of `test_no_secrets_in_logs_or_bridge_info` (P-45); the log-output
+    half lives alongside cli.py's `configure_logging` wiring.
+    """
+    sentinel_sysap_password = "sysap-sentinel-3f9a"
+    sentinel_mqtt_password = "mqtt-sentinel-7c21"
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(
+                tmp_path,
+                broker.port,
+                http_client,
+                sysap_password=sentinel_sysap_password,
+                mqtt_password=sentinel_mqtt_password,
+            ),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            info = supervisor._build_bridge_info()
+            serialized = orjson.dumps(info).decode()
+            assert sentinel_sysap_password not in serialized
+            assert sentinel_mqtt_password not in serialized
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+# ------------------------------------------------------------------------ virtualdevice/create
+
+
+VIRTUAL_SERIAL = "6000AABBCC"
+
+
+async def test_virtualdevice_create_requires_serial_type_ttl(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        with pytest.raises(BridgeApiError, match="requires a non-empty 'serial'"):
+            await supervisor._handle_virtualdevice_create({"type": "x", "ttl": 180})
+        with pytest.raises(BridgeApiError, match="requires a non-empty 'type'"):
+            await supervisor._handle_virtualdevice_create({"serial": "x", "ttl": 180})
+        with pytest.raises(BridgeApiError, match="requires an integer 'ttl'"):
+            await supervisor._handle_virtualdevice_create({"serial": "x", "type": "y"})
+        with pytest.raises(BridgeApiError, match="requires an integer 'ttl'"):
+            await supervisor._handle_virtualdevice_create({"serial": "x", "type": "y", "ttl": True})
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_virtualdevice_create_before_startup_raises(tmp_path: Path) -> None:
+    supervisor = _bare_supervisor(tmp_path)
+    try:
+        with pytest.raises(BridgeApiError, match="not ready"):
+            await supervisor._handle_virtualdevice_create(
+                {"serial": VIRTUAL_SERIAL, "type": "SwitchingActuator", "ttl": 180}
+            )
+    finally:
+        await supervisor._http_session.close()
+
+
+async def test_virtual_device_ttl_keepalive(tmp_path: Path) -> None:
+    """P-16: a finite-TTL virtual device gets a keepalive re-`PUT`ting at `ttl / 2`."""
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as sender:
+                await sender.publish(
+                    f"{BASE}/bridge/request/virtualdevice/create",
+                    orjson.dumps(
+                        {
+                            "serial": VIRTUAL_SERIAL,
+                            "type": "SwitchingActuator",
+                            "ttl": 1,
+                            "displayname": "My Virtual Switch",
+                        }
+                    ),
+                )
+            await _wait_until(
+                lambda: fake.virtual_device_put_count(VIRTUAL_SERIAL) >= 1, timeout_seconds=5.0
+            )
+            assert fake.last_virtual_device_put(VIRTUAL_SERIAL) == {
+                "type": "SwitchingActuator",
+                "properties": {"ttl": "1", "displayname": "My Virtual Switch"},
+            }
+            # ttl=1 -> keepalive fires every 0.5s; wait long enough for at least one refresh.
+            await _wait_until(
+                lambda: fake.virtual_device_put_count(VIRTUAL_SERIAL) >= 2, timeout_seconds=5.0
+            )
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_virtualdevice_create_with_no_expiry_ttl_starts_no_keepalive(
+    tmp_path: Path,
+) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            data = await supervisor._handle_virtualdevice_create(
+                {"serial": VIRTUAL_SERIAL, "type": "SwitchingActuator", "ttl": 0}
+            )
+            assert data == {"serial": VIRTUAL_SERIAL}
+            assert VIRTUAL_SERIAL not in supervisor._virtual_device_tasks
+            await asyncio.sleep(0.2)
+            assert fake.virtual_device_put_count(VIRTUAL_SERIAL) == 1
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_virtualdevice_create_recreate_replaces_the_keepalive_not_stacks_it(
+    tmp_path: Path,
+) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            await supervisor._handle_virtualdevice_create(
+                {"serial": VIRTUAL_SERIAL, "type": "SwitchingActuator", "ttl": 300}
+            )
+            first_task = supervisor._virtual_device_tasks[VIRTUAL_SERIAL]
+            await supervisor._handle_virtualdevice_create(
+                {"serial": VIRTUAL_SERIAL, "type": "SwitchingActuator", "ttl": 300}
+            )
+            second_task = supervisor._virtual_device_tasks[VIRTUAL_SERIAL]
+            assert first_task is not second_task
+            # The loop suppresses CancelledError itself for a clean exit (mirrors
+            # mqtt/client.py's _delayed_republish_retained), so it finishes rather than
+            # ending up in the "cancelled" task state -- done() is what actually matters here.
+            await _wait_until(first_task.done)
+            assert len(supervisor._virtual_device_tasks) == 1
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_virtual_device_keepalive_is_stopped_cleanly_on_shutdown(tmp_path: Path) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            await supervisor._handle_virtualdevice_create(
+                {"serial": VIRTUAL_SERIAL, "type": "SwitchingActuator", "ttl": 1}
+            )
+            assert VIRTUAL_SERIAL in supervisor._virtual_device_tasks
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+        assert supervisor._virtual_device_tasks == {}
+        count_at_shutdown = fake.virtual_device_put_count(VIRTUAL_SERIAL)
+        await asyncio.sleep(1.5)  # long enough for another keepalive tick, if one were still live
+        assert fake.virtual_device_put_count(VIRTUAL_SERIAL) == count_at_shutdown
+
+
+# ---------------------------------------------------------------------------------- dry_run
+
+
+async def test_dry_run_compiles_a_model_without_touching_mqtt(tmp_path: Path) -> None:
+    async with running_fake_sysap(FakeSysAp()) as (fake, http_client):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        # An unreachable MQTT port -- dry_run must never try to connect, or this would hang/fail.
+        supervisor = Supervisor(
+            config=_config(tmp_path, free_port(), http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        model = await supervisor.dry_run()
+        assert len(model.entities) == 1
+        assert supervisor._mqtt is None
+        assert supervisor._ws is None
+        assert supervisor._model is model
+
+
+async def test_dry_run_picks_up_a_persisted_alias(tmp_path: Path) -> None:
+    async with running_fake_sysap(FakeSysAp()) as (fake, http_client):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, free_port(), http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        supervisor._entities_store.set_alias(f"{SERIAL}_ch0000", "kitchen_light")
+        await supervisor._entities_store.save()
+        model = await supervisor.dry_run()
+        idx = model.by_id[f"{SERIAL}_ch0000"]
+        assert model.entities[idx].state_topic == f"{BASE}/kitchen_light"

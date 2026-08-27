@@ -83,6 +83,27 @@ async def test_online_only_when_all_three_signals_are_true() -> None:
             await asyncio.wait_for(task, timeout=5.0)
 
 
+async def test_individual_signal_properties_reflect_each_setter() -> None:
+    """`bridge_info`'s `links` section (docs/04 §4.2; docs/11 WP9) reads these individually,
+    not just the AND'd `online`.
+    """
+    async with running_fake_broker() as broker:
+        client, task = await _connected_client(broker)
+        try:
+            availability = BridgeAvailability(mqtt=client, base_topic=BASE, grace_seconds=10.0)
+            assert (availability.mqtt_connected, availability.sysap_connected) == (False, False)
+            availability.set_mqtt_connected(True)
+            assert (availability.mqtt_connected, availability.sysap_connected) == (True, False)
+            availability.set_sysap_connected(True)
+            assert availability.sysap_connected is True
+            assert availability.model_loaded is False
+            availability.set_model_loaded(True)
+            assert availability.model_loaded is True
+        finally:
+            await client.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
 async def test_publish_now_publishes_online_once_all_signals_are_true() -> None:
     async with running_fake_broker() as broker:
         client, task = await _connected_client(broker)

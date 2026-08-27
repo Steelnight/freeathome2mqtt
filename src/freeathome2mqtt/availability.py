@@ -52,6 +52,18 @@ class BridgeAvailability:
     def online(self) -> bool:
         return self._mqtt_connected and self._sysap_connected and self._model_loaded
 
+    @property
+    def mqtt_connected(self) -> bool:
+        return self._mqtt_connected
+
+    @property
+    def sysap_connected(self) -> bool:
+        return self._sysap_connected
+
+    @property
+    def model_loaded(self) -> bool:
+        return self._model_loaded
+
     def set_mqtt_connected(self, value: bool) -> None:
         self._mqtt_connected = value
         self._on_change()

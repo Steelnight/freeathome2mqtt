@@ -112,6 +112,14 @@ class EntitiesStore:
         record = self.entities.setdefault(entity_id, EntityRecord(first_seen=first_seen))
         record.alias = alias
 
+    def set_options(self, entity_id: str, options: dict[str, Any]) -> None:
+        """Merge `options` into whatever is already persisted (docs/04 §5's `entity/options`
+        is a set of overrides, not a wholesale replacement -- setting `debounce_ms` must not
+        erase a previously-set `enabled`).
+        """
+        record = self.entities.setdefault(entity_id, EntityRecord())
+        record.options.update(options)
+
     def remove(self, entity_id: str) -> None:
         """Explicit prune only (docs/07 §4.1) -- never called automatically on a topology diff."""
         self.entities.pop(entity_id, None)

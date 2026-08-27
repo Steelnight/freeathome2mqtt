@@ -67,6 +67,11 @@ class CompileOptions:
     include_virtual_devices: bool = False
     excluded_interfaces: frozenset[str] = frozenset({"hue", "sonos"})
     aliases: Mapping[str, str] = field(default_factory=dict)
+    # Populated from `EntitiesStore` options (docs/07 §4.1), symmetric with `aliases` above --
+    # `bridge/request/entity/remove` and `entity/options {"enabled": false}` (docs/04 §5) both
+    # persist here rather than mutating the model directly, so the entity simply doesn't exist
+    # in the next `Model` and the existing removed-entity retraction path (P-35) does the rest.
+    excluded_entity_ids: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +88,7 @@ class CompileStats:
     channels_unsupported: int
     channels_ambiguous_profile: int
     entities_created: int
+    channels_excluded_by_option: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +134,7 @@ class _Tally:
     channels_unsupported: int = 0
     channels_ambiguous_profile: int = 0
     entities_created: int = 0
+    channels_excluded_by_option: int = 0
 
 
 @dataclass(slots=True)
@@ -306,6 +313,11 @@ def _collect_one_channel(
 ) -> _CompiledChannel | None:
     ctx.tally.channels_total += 1
 
+    entity_id = f"{device_serial}_{channel_id}"
+    if entity_id in ctx.options.excluded_entity_ids:
+        ctx.tally.channels_excluded_by_option += 1
+        return None
+
     floor_id, room_id = _channel_floor_room(channel, device)
     if floor_id is None or room_id is None:
         if not ctx.options.include_orphan_channels:
@@ -327,7 +339,7 @@ def _collect_one_channel(
         return None
 
     return _CompiledChannel(
-        entity_id=f"{device_serial}_{channel_id}",
+        entity_id=entity_id,
         device_serial=device_serial,
         channel_id=channel_id,
         channel=channel,
@@ -650,6 +662,7 @@ def compile(config: Configuration, profiles: ProfileRegistry, options: CompileOp
         channels_unsupported=ctx.tally.channels_unsupported,
         channels_ambiguous_profile=ctx.tally.channels_ambiguous_profile,
         entities_created=ctx.tally.entities_created,
+        channels_excluded_by_option=ctx.tally.channels_excluded_by_option,
     )
     return Model(
         entities=tuple(entities),

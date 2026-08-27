@@ -10,7 +10,7 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
 **Read `docs/` before writing code.** This file governs *how* code gets written; `docs/` governs
 *what* gets built and in what order ([`docs/11-implementation-plan.md`](docs/11-implementation-plan.md)).
 
-**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP8`](docs/11-implementation-plan.md#wp8--supervisor-lifecycle-resilience) landed.**
+**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP9`](docs/11-implementation-plan.md#wp9--bridge-api-and-configuration) landed.**
 
 - **WP0** — `pyproject.toml`/`ruff.toml`/strict `mypy`+`pytest` config, the package skeleton
   (docstring-only stubs), CI, the MIT licence decision.
@@ -114,9 +114,47 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
   `bridge/info`/`reload`/rename (`mqtt/bridge_api.py`, WP9), and a `404`-on-write-triggers-resync
   hook (docs/06 §4.1's last row — a real, named gap, not silently dropped).
 
-Every module below WP8 is still a docstring-only stub.
-[`docs/11 WP9`](docs/11-implementation-plan.md#wp9--bridge-api-and-configuration) (bridge API,
-`settings.py`, `log.py`, `cli.py`, mDNS, virtual devices) is next.
+- **WP9** — `mqtt/bridge_api.py` (`BridgeApi`: `bridge/request/<command>` parsed and dispatched to a
+  fixed, docs/04 §5-documented handler table — `reload` (reuses `_ReloadDebouncer`, P-55), `restart`
+  (sets `restart_requested` and requests the same graceful shutdown `stop()` does), `entity/rename`
+  (ADR-010's four-step transaction: clear every old retained topic, persist the alias, resync,
+  force-republish under the new topic since a rename usually doesn't change the *value* the ordinary
+  diff-by-value resync keys off of, emit `bridge/event`), `entity/options` (persists to
+  `entities.json`; `enabled` is the only field compilation acts on today, via a new
+  `CompileOptions.excluded_entity_ids` symmetric with the existing `aliases`), `entity/remove`
+  (durable `enabled: false` reusing `entity/options`'s own mechanism plus the already-tested P-35
+  removed-entity retraction path — a docs/07 §4.1 "prune the record" reading was rejected and the
+  document corrected in this commit, per CLAUDE.md §4, because pruning would erase the very marker
+  keeping the entity excluded), `device/refresh` (confirms the device exists via a targeted
+  `GET /api/rest/device/...`, then a full resync — a documented simplification of a true
+  single-device merge), `discovery/republish`, `log_level`, `health` (`bridge/info` plus a
+  pass/fail check list), `virtualdevice/create` (P-16's `ttl/2` keepalive, stopped cleanly on
+  shutdown) — the response envelope (`status`/`data`/`error`/`transaction`) and `BridgeApiError`
+  are unit-tested in isolation with fake handlers over a real broker); `log.py` (central secret
+  redaction shared by a stream formatter and the rate-limited `MqttLogHandler`, P-44's 20 msg/s cap
+  with a dropped-count summary, `log_once`, runtime `set_level`); `settings.py` (the full docs/07 §2
+  config.yaml schema as nested pydantic models, `FAH2MQTT_<SECTION>__<KEY>` env overrides,
+  `!env`/`!secret`/`!file` YAML tags, the docs/07 §2.2 semantic-validation table, and
+  `settings_to_supervisor_config()` — the one-way translator `SupervisorConfig`'s own WP8 docstring
+  promised; several documented knobs have no runtime effect yet — `mqtt.version`, `homeassistant.*`
+  (WP10), `entities.exclude`/`include`, adaptive coalescing, `advanced.metrics` — each a named,
+  accepted-and-validated-but-not-yet-enforced gap, not a silent drop); `sysap/mdns.py` (zeroconf
+  discovery of `free@home*` `_http._tcp.local.` services, tested against a real loopback multicast
+  round trip rather than a mock); `cli.py`/`__main__.py` (`--check-config`, `--discover`,
+  `--capture`, `--dry-run` — via a new `Supervisor.dry_run()` that probes/fetches/compiles and
+  prints the entity table without ever constructing an `MqttClient`, so "publishes nothing" holds
+  by construction — and the default run, with `SIGTERM`/`SIGINT` handling and a
+  `TaskDiedTooManyTimesError` → non-zero exit). Two real bugs found and fixed along the way:
+  `RestClient.create_virtual_device`'s `**properties` was typed `str`, but docs/01 §4.5's own
+  example has an array-valued `capabilities` property, so it's `Any`; and `tools/capture.py`'s
+  pseudonymisation functions expect the raw per-SysAP-UUID *wrapped* shape, while `RestClient`/
+  `WsReader` unwrap it for every other caller — `cli.py`'s `--capture` handler re-wraps both the
+  fetched configuration and every captured frame under the resolved `sysap_uuid` before handing
+  them to `capture()`. Closes P-16, P-33, P-44, P-45.
+
+Every module below WP9 is still a docstring-only stub.
+[`docs/11 WP10`](docs/11-implementation-plan.md#wp10--home-assistant-discovery) (Home Assistant
+discovery) is next.
 
 ---
 

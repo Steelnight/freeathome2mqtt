@@ -77,6 +77,27 @@ def test_alias_for_and_options_for_default_when_unknown(tmp_path: Path) -> None:
     assert store.options_for("unknown") == {}
 
 
+def test_set_options_merges_into_existing_options(tmp_path: Path) -> None:
+    store = EntitiesStore(tmp_path / "entities.json")
+    store.set_options("ABB_ch0001", {"optimistic": False})
+    store.set_options("ABB_ch0001", {"debounce_ms": 100})
+    assert store.options_for("ABB_ch0001") == {"optimistic": False, "debounce_ms": 100}
+
+
+def test_set_options_overwrites_a_previously_set_key(tmp_path: Path) -> None:
+    store = EntitiesStore(tmp_path / "entities.json")
+    store.set_options("ABB_ch0001", {"enabled": True})
+    store.set_options("ABB_ch0001", {"enabled": False})
+    assert store.options_for("ABB_ch0001") == {"enabled": False}
+
+
+def test_set_options_creates_the_entity_record_if_unknown(tmp_path: Path) -> None:
+    store = EntitiesStore(tmp_path / "entities.json")
+    store.set_options("ABB_ch0002", {"enabled": False})
+    assert "ABB_ch0002" in store.entities
+    assert store.alias_for("ABB_ch0002") is None
+
+
 def test_remove_prunes_an_entity(tmp_path: Path) -> None:
     store = EntitiesStore(tmp_path / "entities.json")
     store.set_alias("ABB_ch0001", "hallway")

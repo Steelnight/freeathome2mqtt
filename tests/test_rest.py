@@ -21,6 +21,8 @@ from freeathome2mqtt.sysap.rest import (
     build_ssl_context,
 )
 
+VIRTUAL_SERIAL = "6000AABBCC"
+
 SERIAL = "ABB7F500E17A"
 
 SAMPLE_CONFIG = {
@@ -175,6 +177,58 @@ async def test_get_and_put_datapoint_roundtrip() -> None:
         await rest.put_datapoint(f"{SERIAL}.ch0003.idp0000", "1")
         value = await rest.get_datapoint(f"{SERIAL}.ch0003.idp0000")
         assert value == "1"
+
+
+async def test_get_device_returns_the_single_device_record() -> None:
+    async with running_fake_sysap(FakeSysAp(configuration=SAMPLE_CONFIG)) as (_fake, client):
+        rest = _client_for(client)
+        await rest.get_configuration()
+        device = await rest.get_device(SERIAL)
+        assert device["displayName"] == "Ceiling Light"
+
+
+async def test_get_device_before_configuration_raises() -> None:
+    async with running_fake_sysap(FakeSysAp(configuration=SAMPLE_CONFIG)) as (_fake, client):
+        rest = _client_for(client)
+        with pytest.raises(Exception, match="sysap_uuid is not resolved"):
+            await rest.get_device(SERIAL)
+
+
+async def test_get_device_raises_not_found_for_unknown_serial() -> None:
+    async with running_fake_sysap(FakeSysAp(configuration=SAMPLE_CONFIG)) as (_fake, client):
+        rest = _client_for(client)
+        await rest.get_configuration()
+        with pytest.raises(NotFoundError):
+            await rest.get_device("does-not-exist")
+
+
+async def test_create_virtual_device_puts_the_expected_body() -> None:
+    async with running_fake_sysap(FakeSysAp(configuration=SAMPLE_CONFIG)) as (fake, client):
+        rest = _client_for(client)
+        await rest.get_configuration()
+        await rest.create_virtual_device(
+            VIRTUAL_SERIAL, type_="SwitchingActuator", ttl=180, displayname="My Virtual Switch"
+        )
+        assert fake.last_virtual_device_put(VIRTUAL_SERIAL) == {
+            "type": "SwitchingActuator",
+            "properties": {"ttl": "180", "displayname": "My Virtual Switch"},
+        }
+
+
+async def test_create_virtual_device_before_configuration_raises() -> None:
+    async with running_fake_sysap(FakeSysAp(configuration=SAMPLE_CONFIG)) as (_fake, client):
+        rest = _client_for(client)
+        with pytest.raises(Exception, match="sysap_uuid is not resolved"):
+            await rest.create_virtual_device(VIRTUAL_SERIAL, type_="SwitchingActuator", ttl=180)
+
+
+async def test_create_virtual_device_raises_on_write_failure() -> None:
+    async with running_fake_sysap(FakeSysAp(configuration=SAMPLE_CONFIG)) as (fake, client):
+        rest = _client_for(client)
+        await rest.get_configuration()
+        fake.set_write_result("FAILED")
+        with pytest.raises(CommandFailedError):
+            await rest.create_virtual_device(VIRTUAL_SERIAL, type_="SwitchingActuator", ttl=180)
 
 
 # --------------------------------------------------------------------------- typed errors, no retry

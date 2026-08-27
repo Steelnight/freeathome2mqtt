@@ -21,6 +21,7 @@ dependencies = [
     "pydantic>=2.5",
     "pyyaml>=6.0",
     "jsonschema>=4.20",
+    "zeroconf>=0.150.0",
 ]
 
 [project.urls]

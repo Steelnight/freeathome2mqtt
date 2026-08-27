@@ -62,6 +62,7 @@ class FakeSysAp:
         self._current_concurrent = 0
         self._peak_concurrent = 0
         self._write_result = "OK"
+        self._virtual_device_puts: list[dict[str, Any]] = []
         self._ws_clients: list[web.WebSocketResponse] = []
         self._ws_hung = False
         self._settings_version = DEFAULT_SETTINGS_VERSION
@@ -78,6 +79,12 @@ class FakeSysAp:
         )
         self.app.router.add_put(
             "/fhapi/v1/api/rest/datapoint/{sysap}/{address}", self._handle_put_datapoint
+        )
+        self.app.router.add_get(
+            "/fhapi/v1/api/rest/device/{sysap}/{serial}", self._handle_get_device
+        )
+        self.app.router.add_put(
+            "/fhapi/v1/api/rest/virtualdevice/{sysap}/{serial}", self._handle_put_virtualdevice
         )
         self.app.router.add_get("/fhapi/v1/api/ws", self._handle_ws)
 
@@ -146,6 +153,19 @@ class FakeSysAp:
 
     def peak_concurrency(self) -> int:
         return self._peak_concurrent
+
+    # ------------------------------------------------------------- scripting: virtual devices
+
+    def virtual_device_put_count(self, serial: str) -> int:
+        """How many times `PUT /api/rest/virtualdevice/.../{serial}` has been received."""
+        return sum(1 for put in self._virtual_device_puts if put["serial"] == serial)
+
+    def last_virtual_device_put(self, serial: str) -> dict[str, Any] | None:
+        """The most recent PUT body for `serial`, or `None` if it was never created."""
+        for put in reversed(self._virtual_device_puts):
+            if put["serial"] == serial:
+                return dict(put["body"])
+        return None
 
     # --------------------------------------------------------------------- scripting: WebSocket
 
@@ -270,6 +290,29 @@ class FakeSysAp:
             )
             value = (await request.text()).strip()
             self.set_datapoint(serial, channel, datapoint, value)
+            return web.json_response(self._wrap({"result": self._write_result}))
+
+    async def _handle_get_device(self, request: web.Request) -> web.Response:
+        async with self._track(request.path):
+            if request.path in self._raw_responses:
+                return web.json_response(self._raw_responses[request.path])
+            status = self._forced_status(request.path)
+            if status is not None:
+                return web.Response(status=status)
+            serial = request.match_info["serial"]
+            device = self._configuration["devices"].get(serial)
+            if device is None:
+                return web.Response(status=404)
+            return web.json_response(self._wrap({serial: device}))
+
+    async def _handle_put_virtualdevice(self, request: web.Request) -> web.Response:
+        async with self._track(request.path):
+            status = self._forced_status(request.path)
+            if status is not None:
+                return web.Response(status=status)
+            serial = request.match_info["serial"]
+            body = await request.json()
+            self._virtual_device_puts.append({"serial": serial, "body": body})
             return web.json_response(self._wrap({"result": self._write_result}))
 
     async def _handle_ws(self, request: web.Request) -> web.WebSocketResponse:

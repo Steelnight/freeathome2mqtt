@@ -1452,14 +1452,30 @@ async def test_entity_options_persists_and_resyncs_on_enabled_change(tmp_path: P
         await supervisor._http_session.close()
 
 
-async def test_entity_options_does_not_resync_for_non_enabled_keys(tmp_path: Path) -> None:
+async def test_entity_options_resyncs_for_optimistic_debounce_and_homeassistant_keys(
+    tmp_path: Path,
+) -> None:
+    # optimistic/debounce_ms act on CommandDispatcher, homeassistant on discovery -- both only
+    # take effect on the next _rebuild_dependents/build_model_discovery, i.e. a resync, the same
+    # as enabled already needed one.
+    for key, value in (("optimistic", False), ("debounce_ms", 100), ("homeassistant", {})):
+        supervisor = _bare_supervisor(tmp_path)
+        try:
+            calls = _stub_reload_requests(supervisor)
+            await supervisor._handle_entity_options({"id": "ABB_ch0001", "options": {key: value}})
+            assert calls == [None], f"{key!r} should have requested a resync"
+        finally:
+            await supervisor._http_session.close()
+
+
+async def test_entity_options_does_not_resync_for_an_unrelated_key(tmp_path: Path) -> None:
     supervisor = _bare_supervisor(tmp_path)
     try:
         calls = _stub_reload_requests(supervisor)
         await supervisor._handle_entity_options(
-            {"id": "ABB_ch0001", "options": {"debounce_ms": 100}}
+            {"id": "ABB_ch0001", "options": {"some_future_key": 1}}
         )
-        assert supervisor._entities_store.options_for("ABB_ch0001") == {"debounce_ms": 100}
+        assert supervisor._entities_store.options_for("ABB_ch0001") == {"some_future_key": 1}
         assert calls == []
     finally:
         await supervisor._http_session.close()
@@ -1554,6 +1570,96 @@ async def test_entity_remove_retracts_the_entity_end_to_end(tmp_path: Path) -> N
             )
             assert supervisor._model is not None
             assert entity_id not in supervisor._model.by_id
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_entity_options_optimistic_override_takes_effect_end_to_end(tmp_path: Path) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            entity_id = f"{SERIAL}_ch0000"
+            reloads_before = supervisor.metrics.config_reloads
+
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as sender:
+                await sender.publish(
+                    f"{BASE}/bridge/request/entity/options",
+                    orjson.dumps({"id": entity_id, "options": {"optimistic": False}}),
+                )
+            await _wait_until(
+                lambda: supervisor.metrics.config_reloads > reloads_before, timeout_seconds=5.0
+            )
+
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as sender:
+                await sender.publish(f"{BASE}/switch/set", orjson.dumps({"state": True}))
+            await _wait_until(
+                lambda: (
+                    fake.request_count(
+                        f"/fhapi/v1/api/rest/datapoint/{_UUID}/{SERIAL}.ch0000.idp0000"
+                    )
+                    >= 1
+                )
+            )
+
+            assert supervisor._model is not None
+            idx = supervisor._model.by_id[entity_id]
+            assert supervisor._state is not None
+            # The REST write reached the SysAP (checked above), but the optimistic guess (True)
+            # must never have been applied -- the seeded initial value (False) is untouched.
+            assert supervisor._state.values[idx][0] is False
+            assert supervisor._state.unconfirmed[idx] == 0
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_entity_options_homeassistant_override_takes_effect_end_to_end(
+    tmp_path: Path,
+) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            entity_id = f"{SERIAL}_ch0000"
+            reloads_before = supervisor.metrics.config_reloads
+
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as sender:
+                await sender.publish(
+                    f"{BASE}/bridge/request/entity/options",
+                    orjson.dumps(
+                        {"id": entity_id, "options": {"homeassistant": {"device_class": "outlet"}}}
+                    ),
+                )
+            await _wait_until(
+                lambda: supervisor.metrics.config_reloads > reloads_before, timeout_seconds=5.0
+            )
+
+            assert supervisor._model is not None
+            idx = supervisor._model.by_id[entity_id]
+            entity = supervisor._model.entities[idx]
+            assert len(entity.discovery) == 1
+            body = orjson.loads(entity.discovery[0][1])
+            assert body["device_class"] == "outlet"
         finally:
             await supervisor.stop()
             await asyncio.wait_for(task, timeout=5.0)

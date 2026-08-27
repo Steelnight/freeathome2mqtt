@@ -19,6 +19,7 @@ import orjson
 
 from freeathome2mqtt.model.codecs import CommandError
 from freeathome2mqtt.model.entity import AttrKind
+from freeathome2mqtt.model.transforms import get_transform
 from freeathome2mqtt.mqtt import topics
 from freeathome2mqtt.sysap.rest import SysApError
 
@@ -67,6 +68,8 @@ class CommandDispatcher:
         rate_limiter: RateLimiter,
         base_topic: str,
         debounce_s: float = _DEFAULT_DEBOUNCE_S,
+        optimistic_overrides: Mapping[int, bool] | None = None,
+        debounce_overrides: Mapping[int, float] | None = None,
     ) -> None:
         self._entities = entities
         self._egress = egress
@@ -78,6 +81,10 @@ class CommandDispatcher:
         self._rate_limiter = rate_limiter
         self._base_topic = base_topic
         self._debounce_s = debounce_s
+        # docs/04 §5 `entity/options`: per-entity overrides of the installation-wide defaults
+        # above, keyed by entity idx (rebuilt from entities.json on every resync, docs/07 §4.1).
+        self._optimistic_overrides = optimistic_overrides or {}
+        self._debounce_overrides = debounce_overrides or {}
 
         self._ordered_commands: dict[int, list[str]] = {}
         for entity_idx, cmd_name in egress:
@@ -196,28 +203,83 @@ class CommandDispatcher:
         transaction: str | None,
         optimistic: bool,
     ) -> None:
-        binding = self._egress.get((entity_idx, cmd_name))
-        if binding is None:
+        sub_writes = self._resolve_writes(entity_idx, cmd_name, raw_value)
+        if sub_writes is None:
             error = f"unknown command: {cmd_name!r}"
             await self._respond_error(entity_idx, transaction, "set", error)
             return
+
+        for sub_name, sub_value in sub_writes:
+            applied = await self._apply_one_write(
+                entity_idx, sub_name, sub_value, transaction=transaction, optimistic=optimistic
+            )
+            if not applied:
+                return
+
+        if transaction is not None:
+            await self._respond_ok(entity_idx, transaction, "set")
+
+    def _resolve_writes(
+        self, entity_idx: int, cmd_name: str, raw_value: Any
+    ) -> list[tuple[str, Any]] | None:
+        """A transformed entity's command is offered to `Transform.command()` first (docs/03 §7):
+        `room_temperature_controller` only claims its synthetic `hvac_mode`, raising `CommandError`
+        for everything else so real profile commands (`on_off`, `eco`, `mode`) fall through to the
+        direct path below unchanged; `cover_with_slats` claims every one of its real commands too,
+        to add side effects (the slat auto-reset on a full-open `position`). `None` means "no such
+        command at all", the caller's cue to report `unknown command`.
+        """
+        entity = self._entities[entity_idx]
+        if entity.transform is not None:
+            try:
+                return get_transform(entity.transform).command(
+                    cmd_name, raw_value, self._state.values[entity_idx]
+                )
+            except CommandError:
+                pass
+        if (entity_idx, cmd_name) in self._egress:
+            return [(cmd_name, raw_value)]
+        return None
+
+    async def _apply_one_write(
+        self,
+        entity_idx: int,
+        cmd_name: str,
+        raw_value: Any,
+        *,
+        transaction: str | None,
+        optimistic: bool,
+    ) -> bool:
+        """Validate, encode, optimistically mark and enqueue one `(entity_idx, cmd_name)` write.
+        Returns whether it succeeded; a failure has already sent the error response itself, so
+        `_apply_command` only needs to stop processing further sub-writes, not respond again.
+        """
+        binding = self._egress.get((entity_idx, cmd_name))
+        if binding is None:
+            # A transform named a sub-command absent from this compiled entity -- its datapoint
+            # or codec was unavailable at compile time (docs/03 §5), a profile-authoring bug
+            # surfaced here rather than silently dropped.
+            error = f"unknown command: {cmd_name!r}"
+            await self._respond_error(entity_idx, transaction, "set", error)
+            return False
         try:
             validated = binding.validate(raw_value)
             encoded = binding.encode(validated)
         except (TypeError, ValueError, CommandError) as exc:
             await self._respond_error(entity_idx, transaction, "set", str(exc))
-            return
+            return False
 
-        if optimistic and binding.optimistic_attr is not None:
+        # entity/options {"optimistic": false} (docs/04 §5) forces optimism off regardless of
+        # this message's own no_optimistic flag; unset or true leaves the message's flag as-is.
+        effective_optimistic = optimistic and self._optimistic_overrides.get(entity_idx, True)
+        if effective_optimistic and binding.optimistic_attr is not None:
             attr_idx = binding.optimistic_attr
             self._state.mark_optimistic(entity_idx, attr_idx, validated, attr_bit=1 << attr_idx)
             if binding.confirm:
                 self._reconciler.schedule(entity_idx, attr_idx)
 
         self._enqueue_write(entity_idx, cmd_name, encoded, binding, transaction)
-
-        if transaction is not None:
-            await self._respond_ok(entity_idx, transaction, "set")
+        return True
 
     # ------------------------------------------------------------- debounce (docs/05 §4.2)
 
@@ -248,8 +310,11 @@ class CommandDispatcher:
         self._pending[key] = encoded
         self._windows[key] = asyncio.create_task(self._close_window(key, binding))
 
+    def _debounce_s_for(self, entity_idx: int) -> float:
+        return self._debounce_overrides.get(entity_idx, self._debounce_s)
+
     async def _close_window(self, key: tuple[int, str], binding: EgressBinding) -> None:
-        await asyncio.sleep(self._debounce_s)
+        await asyncio.sleep(self._debounce_s_for(key[0]))
         self._windows.pop(key, None)
         pending = self._pending.pop(key, None)
         if pending is not None and pending != self._last_sent.get(key):

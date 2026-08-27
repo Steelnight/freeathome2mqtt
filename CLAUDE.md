@@ -183,16 +183,43 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
   comfortable headroom. One real bug found and fixed along the way, needed for Home Assistant's
   JSON light schema to actually turn lights off: `model/codecs.py`'s `_encode_bool01` did
   `"1" if value else "0"`, and HA's JSON light schema sends `{"state": "OFF"}` — a non-empty
-  string, which plain Python truthiness always reads as `True`. Deliberately *not* wired, and
-  named rather than silently dropped: `model/transforms.py`'s `RoomTemperatureControllerTransform`
-  (a pre-existing WP4 gap) still isn't called anywhere in `bus/`, so `climate` discovery omits mode
-  topics entirely rather than pointing Home Assistant at a topic that would never publish or accept
-  a value; per-entity `homeassistant`/`optimistic`/`debounce_ms` overrides from `entity/options`
-  still round-trip through `entities.json` without being consulted (installation-wide settings
-  only, same gap `entity/options`'s own WP9 docstring already named for `optimistic`/
-  `debounce_ms`); and `homeassistant.legacy_entity_attributes` stays accepted-and-validated only —
-  its exact intended shape is not specified anywhere in docs/04 §6. Closes P-34, P-35, P-36, P-37,
-  P-41, P-49.
+  string, which plain Python truthiness always reads as `True`. Landed with three gaps named
+  rather than silently dropped, all three closed in the follow-up round below:
+  `model/transforms.py`'s `RoomTemperatureControllerTransform` (a pre-existing WP4 gap) wasn't
+  called anywhere in `bus/` yet, so `climate` discovery omitted mode topics entirely; per-entity
+  `homeassistant`/`optimistic`/`debounce_ms` overrides from `entity/options` round-tripped through
+  `entities.json` without being consulted; `homeassistant.legacy_entity_attributes` stays
+  accepted-and-validated only — its exact intended shape is not specified anywhere in docs/04 §6,
+  so it's still open. Closes P-34, P-35, P-36, P-37, P-41, P-49.
+
+- **Gap-closing round (post-WP10)** — the three named WP10 gaps above, minus
+  `legacy_entity_attributes`. `model/entity.py`/`model/compiler.py`: `Entity` gained a `transform:
+  str | None` field, populated from `profile.transform` at compile time. `bus/publisher.py`:
+  `build_payload()` now calls `get_transform(entity.transform).derive(values)` and merges the
+  result in — docs/03 §7's "transforms run after change detection, off the hot path" holds exactly
+  because this is the coalescing publish path, not `bus/ingress.py`. `bus/commands.py`:
+  `_apply_command` now resolves each command through `_resolve_writes`, which offers it to
+  `Transform.command()` first and falls back to a direct `EgressBinding` lookup on `CommandError`
+  — one algorithm that handles both `room_temperature_controller`'s selective interception
+  (`hvac_mode` only; `on_off`/`eco`/`mode` stay directly settable) and `cover_with_slats`'s blanket
+  interception (every command, including pass-through ones like `stop`) without per-transform
+  special-casing. `homeassistant/components.py`: `build_climate` now wires real
+  `mode_state_topic`/`mode_command_topic` pairs, translating between this bridge's own `hvac_mode`
+  vocabulary (`off`/`eco`/`heating`/`cooling`) and HA's `HVACMode` enum via Jinja dict-lookup
+  templates evaluated at the discovery-payload boundary — the wire vocabulary this bridge already
+  publishes never changes, so no breaking change for existing MQTT consumers; `eco` maps to HA's
+  `auto` as a documented simplification (HA has no native "eco" HVAC mode; a proper `preset_mode`
+  axis is future work). `CommandDispatcher` gained `optimistic_overrides`/`debounce_overrides`
+  constructor params (idx-keyed); `supervisor.py`'s `_entity_optimistic_overrides`/
+  `_entity_debounce_overrides` translate `entities.json`'s per-entity `options` into them, rebuilt
+  on every `_rebuild_dependents` the same way `_effective_compile_options()` already does for
+  `aliases`. `homeassistant/discovery.py`'s `build_model_discovery` gained an `entity_overrides:
+  Mapping[str, Mapping[str, Any]]` parameter — each entity's own `homeassistant` option dict, if
+  any, is shallow-merged onto its auto-built payload before serialising; `supervisor.py`'s
+  `_entity_discovery_overrides` sources it from the same `entities.json` records. All three
+  override kinds only take hold on the next resync, so `_handle_entity_options`'s resync-trigger
+  condition was widened from `{"enabled"}` to `{"enabled", "optimistic", "debounce_ms",
+  "homeassistant"}`.
 
 Every module below WP10 is still a docstring-only stub.
 [`docs/11 WP11`](docs/11-implementation-plan.md#wp11--tier-23-profiles-and-raw-mode) (tier-2/3

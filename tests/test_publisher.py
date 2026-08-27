@@ -21,7 +21,11 @@ BASE = "freeathome2mqtt"
 
 
 def _entity(
-    idx: int, attr_names: tuple[str, ...], attr_kinds: tuple[int, ...] | None = None
+    idx: int,
+    attr_names: tuple[str, ...],
+    attr_kinds: tuple[int, ...] | None = None,
+    *,
+    transform: str | None = None,
 ) -> Entity:
     kinds = attr_kinds if attr_kinds is not None else tuple(AttrKind.STATE for _ in attr_names)
     return Entity(
@@ -40,6 +44,7 @@ def _entity(
         availability_topic=None,
         optimistic=False,
         discovery=(),
+        transform=transform,
     )
 
 
@@ -79,6 +84,44 @@ def test_build_payload_omits_last_changed_when_disabled() -> None:
     state.seed(0, 0, True)
     publisher = Publisher(entities=entities, state=state, mqtt=None, publish_last_changed=False)
     assert "last_changed" not in publisher.build_payload(0)
+
+
+def test_build_payload_merges_transform_derived_attributes() -> None:
+    # docs/03 §7, docs/05 R4: transforms run after change detection, right where build_payload
+    # already reads the entity's raw values -- room_temperature_controller derives a synthetic
+    # "hvac_mode" key from on_off/eco/mode that is not itself a declared profile attribute.
+    entities = [_entity(0, ("on_off", "eco", "mode"), transform="room_temperature_controller")]
+    state = StateStore(entities)
+    state.seed(0, 0, True)
+    state.seed(0, 1, False)
+    state.seed(0, 2, "heating")
+    publisher = Publisher(entities=entities, state=state, mqtt=None, publish_last_changed=False)
+    payload = publisher.build_payload(0)
+    assert payload == {
+        "id": "SERIAL_ch0000",
+        "on_off": True,
+        "eco": False,
+        "mode": "heating",
+        "hvac_mode": "heating",
+    }
+
+
+def test_build_payload_cover_with_slats_hides_slat_position_when_fully_open() -> None:
+    entities = [_entity(0, ("position", "slat_position"), transform="cover_with_slats")]
+    state = StateStore(entities)
+    state.seed(0, 0, 100)
+    state.seed(0, 1, 30)
+    publisher = Publisher(entities=entities, state=state, mqtt=None, publish_last_changed=False)
+    payload = publisher.build_payload(0)
+    assert payload["slat_position"] is None
+
+
+def test_build_payload_without_a_transform_is_unaffected() -> None:
+    entities = [_entity(0, ("state",))]
+    state = StateStore(entities)
+    state.seed(0, 0, True)
+    publisher = Publisher(entities=entities, state=state, mqtt=None, publish_last_changed=False)
+    assert publisher.build_payload(0) == {"id": "SERIAL_ch0000", "state": True}
 
 
 async def _wait_until(predicate, *, timeout_seconds: float = 5.0, interval: float = 0.005) -> None:

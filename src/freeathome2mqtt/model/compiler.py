@@ -613,6 +613,7 @@ def _build_entity(
         else None,
         optimistic=has_optimistic_command,
         discovery=(),  # WP10 renders real Home Assistant discovery payloads; empty until then.
+        transform=compiled.profile.transform,
     )
     return entity, attrs.bindings, egress, attrs.initial_values
 

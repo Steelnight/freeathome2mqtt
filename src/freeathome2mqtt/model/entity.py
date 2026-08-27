@@ -87,6 +87,7 @@ class Entity:
     availability_topic: str | None
     optimistic: bool
     discovery: tuple[tuple[str, bytes], ...]
+    transform: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

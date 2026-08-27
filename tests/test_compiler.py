@@ -119,6 +119,20 @@ def test_compile_produces_one_entity_for_one_matching_channel() -> None:
     assert entity.idx == 0
 
 
+def test_compile_entity_transform_defaults_to_none_when_profile_has_none() -> None:
+    config = _config({"ABB700990001": _device({"ch0000": _switch_channel()})})
+    model = compile(config, _switch_registry(), CompileOptions())
+    assert model.entities[0].transform is None
+
+
+def test_compile_entity_transform_is_populated_from_the_profile() -> None:
+    transformed_profile = {**_SWITCH_PROFILE, "transform": "cover_with_slats"}
+    registry = build_registry([parse_profile(transformed_profile, source="<test>")])
+    config = _config({"ABB700990001": _device({"ch0000": _switch_channel()})})
+    model = compile(config, registry, CompileOptions())
+    assert model.entities[0].transform == "cover_with_slats"
+
+
 def test_compile_builds_topics_from_the_resolved_slug() -> None:
     # A single, uncontested channel keeps the bare slug -- naming.py only prefixes the area when
     # the bare name collides with another entity (docs/03 §1.1).

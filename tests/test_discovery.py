@@ -134,6 +134,45 @@ def test_via_device_and_sw_version_come_from_options() -> None:
     assert body["origin"]["sw"] == "1.2.3"
 
 
+def test_entity_override_merges_on_top_of_the_built_payload() -> None:
+    # entity/options {"homeassistant": {...}} (docs/04 §5) round-trips through entities.json --
+    # this is the point where it finally takes effect, without touching the profile itself.
+    config = _switch_config()
+    entity_id = f"{SERIAL}_ch0000"
+    model = build_model_discovery(
+        _compiled(config),
+        REGISTRY,
+        config,
+        DiscoveryOptions(),
+        entity_overrides={entity_id: {"device_class": "outlet", "entity_category": "config"}},
+    )
+    body = orjson.loads(model.discovery[0][1])
+    assert body["device_class"] == "outlet"
+    assert body["entity_category"] == "config"
+
+
+def test_entity_override_for_a_different_entity_id_has_no_effect() -> None:
+    config = _switch_config()
+    model = build_model_discovery(
+        _compiled(config),
+        REGISTRY,
+        config,
+        DiscoveryOptions(),
+        entity_overrides={"some_other_entity": {"device_class": "outlet"}},
+    )
+    body = orjson.loads(model.discovery[0][1])
+    assert "device_class" not in body
+
+
+def test_no_entity_overrides_leaves_the_payload_unchanged() -> None:
+    config = _switch_config()
+    without = build_model_discovery(_compiled(config), REGISTRY, config, DiscoveryOptions())
+    with_empty = build_model_discovery(
+        _compiled(config), REGISTRY, config, DiscoveryOptions(), entity_overrides={}
+    )
+    assert without.discovery == with_empty.discovery
+
+
 def _window_door_config() -> dict[str, Any]:
     return {
         "floorplan": {"floors": {"01": {"name": "GF", "rooms": {"0C": {"name": "Room"}}}}},

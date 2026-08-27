@@ -354,13 +354,19 @@ Points that matter:
 
 This table covers every profile class, current (tier-1, WP4) and future (tier-2/3, WP11) alike;
 `homeassistant/components.py` (WP10) implements the tier-1 rows above against the 15 profiles
-shipped so far. Two deliberate narrowings versus the table's own wording: `heating_actuator` maps
+shipped so far. One deliberate narrowing versus the table's own wording: `heating_actuator` maps
 to `number`, not `valve` (a bare 0-100% actuating value with no open/close semantics fits `number`
-more directly); and `room_temperature_controller`'s discovery payload omits mode topics entirely —
-"modes derived by a transform" describes `model/transforms.py`'s `RoomTemperatureControllerTransform`,
-which is not yet wired into `bus/` (a pre-existing gap from WP4, out of WP10's scope) — pointing
-Home Assistant at a topic that would never publish or accept a value would be worse than omitting
-mode control until that transform is actually wired.
+more directly).
+
+`room_temperature_controller`'s "modes derived by a transform" is `model/transforms.py`'s
+`RoomTemperatureControllerTransform`, wired into `bus/publisher.py` (state) and `bus/commands.py`
+(commands) as of the fix following WP10. `mode_state_template`/`mode_command_template` map this
+bridge's own `hvac_mode` vocabulary (`off`/`eco`/`heating`/`cooling`) to Home Assistant's
+`HVACMode` words (`off`/`auto`/`heat`/`cool`) at the discovery-payload boundary, never by renaming
+the vocabulary this bridge itself publishes. HA has no native "eco" HVAC mode, so it is mapped to
+HA's `auto` — a documented simplification; a proper `preset_mode` axis for it is future work.
+`room_temperature_controller_basic` has no `on_off`/`eco`/`mode` at all, so its discovery payload
+has no mode topics — there is nothing to derive one from.
 
 ### 6.3 Lifecycle
 

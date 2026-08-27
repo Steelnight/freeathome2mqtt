@@ -16,10 +16,15 @@ buffer-then-fetch-then-drain shape on every WebSocket reconnect, topology change
 re-publishing everything on every blip; discovery uses the same changed-only path, backed by
 `persistence.DiscoveryStore` (docs/07 §4.2).
 
+Per-entity `entity/options` overrides are wired end to end: `optimistic`/`debounce_ms` into
+`CommandDispatcher` via `_entity_optimistic_overrides`/`_entity_debounce_overrides`, and
+`homeassistant` into `build_model_discovery` via `_entity_discovery_overrides` -- each shallow-
+merged onto its entity's auto-built discovery payload (`homeassistant/discovery.py`). All three
+only take hold on the next `_rebuild_dependents`/`_compile_and_build_discovery` call, i.e. a
+resync -- see `_handle_entity_options`'s own docstring for why setting any of them triggers one.
+
 Not yet wired here, by design: a 404-on-write-triggers-resync hook (docs/06 §4.1's last row -- a
-real gap, deferred rather than bolted on without an acceptance test to pin its shape down), and
-per-entity `homeassistant`/`optimistic`/`debounce_ms` overrides from `entity/options` (accepted and
-persisted, not yet consulted -- see `_handle_entity_options`'s own docstring).
+real gap, deferred rather than bolted on without an acceptance test to pin its shape down).
 """
 
 from __future__ import annotations
@@ -726,6 +731,30 @@ class Supervisor:
             excluded_entity_ids=excluded_entity_ids,
         )
 
+    def _entity_optimistic_overrides(self, model: Model) -> dict[int, bool]:
+        """docs/04 §5 `entity/options {"optimistic": ...}`: keyed by idx in *this* model, since
+        `entities.json` itself is keyed by the stable entity id, not a compile-specific index.
+        """
+        overrides: dict[int, bool] = {}
+        for entity_id, record in self._entities_store.entities.items():
+            value = record.options.get("optimistic")
+            idx = model.by_id.get(entity_id)
+            if isinstance(value, bool) and idx is not None:
+                overrides[idx] = value
+        return overrides
+
+    def _entity_debounce_overrides(self, model: Model) -> dict[int, float]:
+        """docs/04 §5 `entity/options {"debounce_ms": ...}`, converted to seconds to match
+        `CommandDispatcher`'s own unit.
+        """
+        overrides: dict[int, float] = {}
+        for entity_id, record in self._entities_store.entities.items():
+            value = record.options.get("debounce_ms")
+            idx = model.by_id.get(entity_id)
+            if isinstance(value, int | float) and not isinstance(value, bool) and idx is not None:
+                overrides[idx] = value / 1000
+        return overrides
+
     def _discovery_options(self) -> DiscoveryOptions:
         settings = self._sysap_settings
         return DiscoveryOptions(
@@ -736,9 +765,27 @@ class Supervisor:
             bridge_version=_package_version(),
         )
 
+    def _entity_discovery_overrides(self) -> dict[str, dict[str, Any]]:
+        """`entity_id -> {"homeassistant": {...}}`'s inner dict (docs/04 §5's `entity/options`),
+        round-tripped through `entities.json` and shallow-merged onto each entity's built discovery
+        payload by `build_model_discovery`.
+        """
+        overrides: dict[str, dict[str, Any]] = {}
+        for entity_id, record in self._entities_store.entities.items():
+            value = record.options.get("homeassistant")
+            if isinstance(value, dict):
+                overrides[entity_id] = value
+        return overrides
+
     def _compile_and_build_discovery(self, config: Configuration) -> Model:
         model = compile_model(config, self._profiles, self._effective_compile_options())
-        return build_model_discovery(model, self._profiles, config, self._discovery_options())
+        return build_model_discovery(
+            model,
+            self._profiles,
+            config,
+            self._discovery_options(),
+            self._entity_discovery_overrides(),
+        )
 
     async def _fetch_configuration_with_retry(self) -> Configuration:
         """docs/06 §7: the SysAP may simply be booting alongside us -- retry indefinitely rather
@@ -847,6 +894,8 @@ class Supervisor:
             rate_limiter=rate_limiter,
             base_topic=self._config.base_topic,
             debounce_s=self._config.command_debounce_s,
+            optimistic_overrides=self._entity_optimistic_overrides(model),
+            debounce_overrides=self._entity_debounce_overrides(model),
         )
 
     # ------------------------------------------------------------------- live callbacks (WP8)
@@ -1087,14 +1136,13 @@ class Supervisor:
     async def _handle_entity_options(self, args: dict[str, Any]) -> dict[str, Any]:
         """docs/04 §5 `entity/options`: persists overrides to `entities.json` (docs/07 §4.1).
 
-        `enabled` is the only override compilation itself acts on today (via
-        `CompileOptions.excluded_entity_ids`, symmetric with `aliases`) -- it triggers a debounced
-        resync so the change actually takes effect. `optimistic`/`debounce_ms`/`homeassistant`
-        round-trip through the store correctly but are not yet consulted anywhere at runtime; that
-        is a real, named gap (per-entity command/discovery overrides), not silently dropped --
-        `CommandDispatcher` and HA discovery (`homeassistant/discovery.py`, WP10) both still apply
-        installation-wide settings only; a per-entity `homeassistant` override in `entities.json`
-        is accepted and persisted but has no effect on what `build_model_discovery` produces.
+        `enabled` acts on compilation itself (`CompileOptions.excluded_entity_ids`, symmetric
+        with `aliases`); `optimistic`/`debounce_ms` act on `CommandDispatcher`
+        (`Supervisor._entity_optimistic_overrides`/`_entity_debounce_overrides`, rebuilt on every
+        `_rebuild_dependents`); `homeassistant` is shallow-merged onto the entity's discovery
+        payload by `build_model_discovery` (`Supervisor._entity_discovery_overrides`). All four
+        still need a resync to actually apply (`_rebuild_dependents`/`_compile_and_build_discovery`
+        only run there), so any of them requests one -- not just `enabled`.
         """
         entity_id = args.get("id")
         options = args.get("options")
@@ -1103,7 +1151,7 @@ class Supervisor:
         if not isinstance(options, dict):
             raise BridgeApiError("entity/options requires an 'options' object")
         self._entities_store.set_options(entity_id, options)
-        if "enabled" in options:
+        if options.keys() & {"enabled", "optimistic", "debounce_ms", "homeassistant"}:
             self._reload_debouncer.request()
         return {"id": entity_id, "options": self._entities_store.options_for(entity_id)}
 

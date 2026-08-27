@@ -325,8 +325,8 @@ def test_build_number_heating_actuator() -> None:
 # ----------------------------------------------------------------------------------- climate
 
 
-def test_build_climate_omits_mode_topics() -> None:
-    config = _config(
+def _rtc_config() -> dict[str, Any]:
+    return _config(
         {
             "inputs": {
                 "idp0000": {"pairingID": 51, "value": "21.0"},
@@ -344,12 +344,61 @@ def test_build_climate_omits_mode_topics() -> None:
         },
         functionID="a",
     )
+
+
+def test_build_climate_full_profile_wires_real_mode_topics() -> None:
+    # room_temperature_controller has on_off (docs/03 §7's transform makes hvac_mode a real,
+    # working attribute+command now) -- mode control must no longer be omitted.
+    config = _rtc_config()
     ctx = _context(config, _compile_one(config))
     payload = build_climate(ctx)
     assert payload["current_temperature_topic"] == ctx.entity.state_topic
     assert payload["temperature_command_topic"] == (
         f"{ctx.entity.state_topic}/set/setpoint_temperature"
     )
+    assert payload["mode_state_topic"] == ctx.entity.state_topic
+    assert payload["mode_command_topic"] == f"{ctx.entity.state_topic}/set/hvac_mode"
+    assert set(payload["modes"]) == {"off", "auto", "heat", "cool"}
+
+
+def test_build_climate_mode_state_template_maps_our_vocabulary_to_ha() -> None:
+    # A literal string check, matching how every other value_template in this test suite is
+    # verified (e.g. test_build_switch_uses_scalar_shorthand_topics) -- Jinja itself is never a
+    # project dependency; Home Assistant is the one that renders these, never this bridge.
+    config = _rtc_config()
+    ctx = _context(config, _compile_one(config))
+    payload = build_climate(ctx)
+    assert payload["mode_state_template"] == (
+        "{{ {'off': 'off', 'eco': 'auto', 'heating': 'heat', 'cooling': 'cool'}"
+        ".get(value_json.hvac_mode, 'off') }}"
+    )
+
+
+def test_build_climate_mode_command_template_maps_ha_vocabulary_to_ours() -> None:
+    config = _rtc_config()
+    ctx = _context(config, _compile_one(config))
+    payload = build_climate(ctx)
+    assert payload["mode_command_template"] == (
+        "{{ {'off': 'off', 'auto': 'eco', 'heat': 'heating', 'cool': 'cooling'}"
+        ".get(value, 'off') }}"
+    )
+
+
+def test_build_climate_basic_profile_still_omits_mode_topics() -> None:
+    # room_temperature_controller_basic has no on_off/eco/mode at all -- there is nothing for
+    # hvac_mode to derive from, so mode control must stay omitted.
+    config = _config(
+        {
+            "inputs": {"idp0000": {"pairingID": 51, "value": "21.0"}},
+            "outputs": {
+                "odp0000": {"pairingID": 304, "value": "21.0"},
+                "odp0001": {"pairingID": 305, "value": "0"},
+            },
+        },
+        functionID="a",
+    )
+    ctx = _context(config, _compile_one(config))
+    payload = build_climate(ctx)
     assert "mode_command_topic" not in payload
     assert "mode_state_topic" not in payload
 

@@ -35,7 +35,9 @@ def _range_validator(low: float, high: float):
     return lambda value: max(low, min(high, value))
 
 
-def _entity(idx: int, attr_names: tuple[str, ...], slug: str) -> Entity:
+def _entity(
+    idx: int, attr_names: tuple[str, ...], slug: str, *, transform: str | None = None
+) -> Entity:
     return Entity(
         idx=idx,
         id=f"{SERIAL}_ch{idx:04d}",
@@ -52,6 +54,7 @@ def _entity(idx: int, attr_names: tuple[str, ...], slug: str) -> Entity:
         availability_topic=None,
         optimistic=False,
         discovery=(),
+        transform=transform,
     )
 
 
@@ -90,6 +93,39 @@ def _egress(
     )
 
 
+def _enum_binding(
+    entity_idx: int, attr_idx: int, dp: str, decode_values: dict[str, str]
+) -> Binding:
+    codec = build_codec("enum", decode_values=decode_values, encode_values={})
+    return Binding(
+        entity_idx=entity_idx,
+        attr_idx=attr_idx,
+        decode=codec.decode,
+        kind=AttrKind.STATE,
+        attr_bit=1 << attr_idx,
+    )
+
+
+def _enum_egress(
+    entity_idx: int,
+    channel_id: str,
+    dp: str,
+    encode_values: dict[str, str],
+    *,
+    optimistic_attr: int | None,
+) -> EgressBinding:
+    codec = build_codec("enum", decode_values={}, encode_values=encode_values)
+    return EgressBinding(
+        entity_idx=entity_idx,
+        rest_path=f"{SERIAL}.{channel_id}.{dp}",
+        encode=codec.encode,
+        continuous=False,
+        optimistic_attr=optimistic_attr,
+        validate=_identity,
+        confirm=True,
+    )
+
+
 def _channel(inputs: dict[str, str], outputs: dict[str, str]) -> dict[str, Any]:
     return {
         "inputs": {dp: {"value": v} for dp, v in inputs.items()},
@@ -101,7 +137,9 @@ def _fixture() -> tuple[list[Entity], dict, dict]:
     """switch (ch0000): one discrete bool01 command. dimmer (ch0001): discrete state +
     continuous brightness, declared in that order. noconfirm (ch0002): confirm:false command.
     nocommands (ch0003): no egress entries at all. noopt (ch0004): a command with no optimistic
-    tracking (optimistic_attr=None).
+    tracking (optimistic_attr=None). rtc (ch0005): room_temperature_controller-transformed,
+    on_off/eco/mode all directly settable too. cover (ch0006): cover_with_slats-transformed,
+    position/slat_position/stop all directly settable too (docs/03 §7).
     """
     entities = [
         _entity(0, ("state",), "switch"),
@@ -109,6 +147,8 @@ def _fixture() -> tuple[list[Entity], dict, dict]:
         _entity(2, ("state",), "noconfirm"),
         _entity(3, ("state",), "nocommands"),
         _entity(4, (), "noopt"),
+        _entity(5, ("on_off", "eco", "mode"), "rtc", transform="room_temperature_controller"),
+        _entity(6, ("position", "slat_position"), "cover", transform="cover_with_slats"),
     ]
     egress = {
         (0, "state"): _egress(0, "ch0000", "idp0000", "bool01", optimistic_attr=0),
@@ -124,12 +164,31 @@ def _fixture() -> tuple[list[Entity], dict, dict]:
         ),
         (2, "state"): _egress(2, "ch0002", "idp0020", "bool01", optimistic_attr=0, confirm=False),
         (4, "trigger"): _egress(4, "ch0004", "idp0040", "bool01", optimistic_attr=None),
+        (5, "on_off"): _egress(5, "ch0005", "idp0050", "bool01", optimistic_attr=0),
+        (5, "eco"): _egress(5, "ch0005", "idp0051", "bool01", optimistic_attr=1),
+        (5, "mode"): _enum_egress(
+            5, "ch0005", "idp0052", {"heating": "0", "cooling": "1"}, optimistic_attr=2
+        ),
+        (6, "position"): _egress(
+            6, "ch0006", "idp0060", "percent_int", optimistic_attr=0, continuous=True
+        ),
+        (6, "slat_position"): _egress(
+            6, "ch0006", "idp0061", "percent_int", optimistic_attr=1, continuous=True
+        ),
+        (6, "stop"): _egress(6, "ch0006", "idp0062", "bool01", optimistic_attr=None),
     }
     ingress = {
         f"{SERIAL}/ch0000/odp0000": _binding(0, 0, "odp0000", "bool01"),
         f"{SERIAL}/ch0001/odp0010": _binding(1, 0, "odp0010", "bool01"),
         f"{SERIAL}/ch0001/odp0011": _binding(1, 1, "odp0011", "percent_int"),
         f"{SERIAL}/ch0002/odp0020": _binding(2, 0, "odp0020", "bool01"),
+        f"{SERIAL}/ch0005/odp0050": _binding(5, 0, "odp0050", "bool01"),
+        f"{SERIAL}/ch0005/odp0051": _binding(5, 1, "odp0051", "bool01"),
+        f"{SERIAL}/ch0005/odp0052": _enum_binding(
+            5, 2, "odp0052", {"0": "heating", "1": "cooling"}
+        ),
+        f"{SERIAL}/ch0006/odp0060": _binding(6, 0, "odp0060", "percent_int"),
+        f"{SERIAL}/ch0006/odp0061": _binding(6, 1, "odp0061", "percent_int"),
     }
     return entities, egress, ingress
 
@@ -145,6 +204,14 @@ def _fake_configuration() -> dict[str, Any]:
                     ),
                     "ch0002": _channel({"idp0020": "0"}, {"odp0020": "0"}),
                     "ch0004": _channel({"idp0040": "0"}, {}),
+                    "ch0005": _channel(
+                        {"idp0050": "0", "idp0051": "0", "idp0052": "0"},
+                        {"odp0050": "0", "odp0051": "0", "odp0052": "0"},
+                    ),
+                    "ch0006": _channel(
+                        {"idp0060": "0", "idp0061": "0", "idp0062": "0"},
+                        {"odp0060": "0", "odp0061": "0"},
+                    ),
                 }
             }
         }
@@ -193,7 +260,12 @@ class _Environment:
 
 
 @contextlib.asynccontextmanager
-async def _environment(*, debounce_s: float = 0.05) -> AsyncIterator[_Environment]:
+async def _environment(
+    *,
+    debounce_s: float = 0.05,
+    optimistic_overrides: dict[int, bool] | None = None,
+    debounce_overrides: dict[int, float] | None = None,
+) -> AsyncIterator[_Environment]:
     entities, egress, ingress = _fixture()
     state = StateStore(entities)
     by_topic = {e.state_topic.rsplit("/", 1)[-1]: e.idx for e in entities}
@@ -248,6 +320,8 @@ async def _environment(*, debounce_s: float = 0.05) -> AsyncIterator[_Environmen
                 rate_limiter=rate_limiter,
                 base_topic=BASE,
                 debounce_s=debounce_s,
+                optimistic_overrides=optimistic_overrides or {},
+                debounce_overrides=debounce_overrides or {},
             )
             dispatcher_holder.append(dispatcher)
 
@@ -414,6 +488,40 @@ async def test_continuous_command_debounces_leading_and_trailing_edge() -> None:
         await _wait_until(lambda: env.fake.request_count(path) >= 2, timeout_seconds=2.0)
         assert _input_value(env.fake, "ch0001", "idp0011") == "30"  # trailing edge: final value
         assert env.fake.request_count(path) == 2  # 20 was collapsed into pending, never sent
+
+
+async def test_per_entity_optimistic_override_false_suppresses_the_optimistic_write() -> None:
+    # entity/options {"optimistic": false} (docs/04 §5, docs/07 §4.1) must force optimism off
+    # even though this particular message never set no_optimistic itself.
+    async with _environment(optimistic_overrides={0: False}) as env:
+        await env.outsider.publish(f"{BASE}/switch/set", orjson.dumps({"state": True}))
+        await _wait_until(lambda: env.fake.request_count(_dp_path(f"{SERIAL}.ch0000.idp0000")) >= 1)
+
+        assert env.state.values[0][0] is None  # the REST write still happened, just not the guess
+        assert env.state.unconfirmed[0] == 0
+
+
+async def test_per_entity_optimistic_override_only_affects_its_own_entity() -> None:
+    async with _environment(optimistic_overrides={0: False}) as env:
+        await env.outsider.publish(f"{BASE}/dimmer/set", orjson.dumps({"state": True}))
+        await _wait_until(lambda: env.state.values[1][0] is True)  # unaffected -- different entity
+
+
+async def test_per_entity_debounce_override_widens_the_window() -> None:
+    # entity/options {"debounce_ms": ...} overrides the dispatcher-wide default just for this
+    # entity's own commands.
+    async with _environment(debounce_s=0.05, debounce_overrides={1: 0.4}) as env:
+        path = _dp_path(f"{SERIAL}.ch0001.idp0011")
+
+        await env.outsider.publish(f"{BASE}/dimmer/set", orjson.dumps({"brightness": 10}))
+        await _wait_until(lambda: env.fake.request_count(path) >= 1)  # leading edge
+
+        await env.outsider.publish(f"{BASE}/dimmer/set", orjson.dumps({"brightness": 20}))
+        await asyncio.sleep(0.15)  # comfortably past the dispatcher-wide 0.05s default
+        assert env.fake.request_count(path) == 1  # the override window is still open
+
+        await _wait_until(lambda: env.fake.request_count(path) >= 2, timeout_seconds=2.0)
+        assert _input_value(env.fake, "ch0001", "idp0011") == "20"
 
 
 async def test_stop_accepting_ignores_further_messages() -> None:
@@ -595,6 +703,79 @@ async def test_continuous_command_with_no_follow_up_sends_exactly_once() -> None
         await asyncio.sleep(0.15)  # past the window close, with no follow-up message
 
         assert env.fake.request_count(path) == 1  # no redundant resend of the same value
+
+
+async def test_transformed_hvac_mode_command_writes_multiple_datapoints() -> None:
+    # docs/03 §7: room_temperature_controller's "hvac_mode" is not a real profile command --
+    # setting it to "eco" must write BOTH on_off and eco (RoomTemperatureControllerTransform).
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/rtc/set", orjson.dumps({"hvac_mode": "eco"}))
+        await _wait_until(lambda: env.state.values[5][0] is True and env.state.values[5][1] is True)
+
+        await _wait_until(lambda: env.fake.request_count(_dp_path(f"{SERIAL}.ch0005.idp0050")) >= 1)
+        await _wait_until(lambda: env.fake.request_count(_dp_path(f"{SERIAL}.ch0005.idp0051")) >= 1)
+        assert _input_value(env.fake, "ch0005", "idp0050") == "1"
+        assert _input_value(env.fake, "ch0005", "idp0051") == "1"
+
+
+async def test_transformed_hvac_mode_command_responds_ok_once() -> None:
+    async with _environment() as env:
+        await env.outsider.publish(
+            f"{BASE}/rtc/set", orjson.dumps({"hvac_mode": "heating", "transaction": "t1"})
+        )
+        await env.collect_responses(count=1)
+        assert env.responses == [
+            (
+                f"{BASE}/bridge/response/set",
+                {"status": "ok", "id": f"{SERIAL}_ch0005", "transaction": "t1"},
+            )
+        ]
+
+
+async def test_transformed_entity_real_commands_still_settable_directly() -> None:
+    # room_temperature_controller's transform only claims "hvac_mode" -- on_off/eco/mode are
+    # still ordinary, directly-settable profile commands (docs/03 §7's own worked example).
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/rtc/set", orjson.dumps({"eco": True}))
+        await _wait_until(lambda: env.state.values[5][1] is True)
+        await _wait_until(lambda: env.fake.request_count(_dp_path(f"{SERIAL}.ch0005.idp0051")) >= 1)
+
+
+async def test_transformed_entity_unknown_command_still_errors() -> None:
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/rtc/set", orjson.dumps({"nope": True}))
+        await env.collect_responses(count=1)
+        assert env.responses[0][1]["status"] == "error"
+        assert "nope" in env.responses[0][1]["error"]
+        assert env.state.dirty == set()
+
+
+async def test_cover_with_slats_position_fully_open_also_resets_slat_position() -> None:
+    # docs/03 §7: opening fully leaves the slat angle meaningless -- CoverWithSlatsTransform
+    # resets it to 0 as a side effect of a full-open position command.
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/cover/set", orjson.dumps({"position": 100}))
+        await _wait_until(lambda: env.state.values[6][0] == 100 and env.state.values[6][1] == 0)
+        await _wait_until(lambda: env.fake.request_count(_dp_path(f"{SERIAL}.ch0006.idp0060")) >= 1)
+        await _wait_until(lambda: env.fake.request_count(_dp_path(f"{SERIAL}.ch0006.idp0061")) >= 1)
+        assert _input_value(env.fake, "ch0006", "idp0060") == "100"
+        assert _input_value(env.fake, "ch0006", "idp0061") == "0"
+
+
+async def test_cover_with_slats_position_not_fully_open_leaves_slat_alone() -> None:
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/cover/set", orjson.dumps({"position": 50}))
+        await _wait_until(lambda: env.state.values[6][0] == 50)
+        await asyncio.sleep(0.1)
+        assert env.fake.request_count(_dp_path(f"{SERIAL}.ch0006.idp0061")) == 0
+
+
+async def test_cover_with_slats_stop_command_is_intercepted_but_still_works() -> None:
+    # cover_with_slats' transform claims every command, including ones with no real side effect.
+    async with _environment() as env:
+        await env.outsider.publish(f"{BASE}/cover/set", orjson.dumps({"stop": True}))
+        await _wait_until(lambda: env.fake.request_count(_dp_path(f"{SERIAL}.ch0006.idp0062")) >= 1)
+        assert _input_value(env.fake, "ch0006", "idp0062") == "1"
 
 
 async def test_write_failure_without_optimistic_tracking_still_responds() -> None:

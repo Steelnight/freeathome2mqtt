@@ -11,11 +11,12 @@ capability flags, ...). `homeassistant/discovery.py` adds the fields every compo
 
 Two deliberate simplifications, named rather than silently dropped:
 
-* `climate` omits mode topics entirely. `model/transforms.py`'s
-  `RoomTemperatureControllerTransform` derives a synthetic `hvac_mode` attribute/command that is
-  not wired into `bus/` yet (a pre-existing gap from WP4, out of WP10's scope) -- pointing Home
-  Assistant at a topic that will never publish or accept a value would be worse than not offering
-  mode control at all.
+* `climate` maps HA's `HVACMode` vocabulary to `model/transforms.py`'s own "off"/"eco"/"heating"/
+  "cooling" via `_dict_lookup_template` in `mode_state_template`/`mode_command_template`, rather
+  than renaming this bridge's own published `hvac_mode` vocabulary (a breaking change for anyone
+  already consuming it). HA has no native "eco" HVAC mode, so it is mapped to HA's `auto`; a
+  proper `preset_mode` axis for it is future work. `room_temperature_controller_basic` has no
+  `on_off`/`eco`/`mode` at all, so it gets no mode topics -- there is nothing to derive one from.
 * `heating_actuator` maps to `number`, not `valve` -- it is a bare 0-100% actuating value with no
   open/close semantics, which fits HA's generic `number` platform more directly than `valve`.
 """
@@ -33,6 +34,14 @@ from freeathome2mqtt.sysap.codes import Parameter
 from freeathome2mqtt.sysap.schema import Channel, Device
 
 _EVENT_TYPE = "press"
+
+# docs/03 §7: RoomTemperatureControllerTransform derives/accepts "off"/"eco"/"heating"/"cooling",
+# never HA's own HVACMode vocabulary. HA has no native "eco" HVAC mode -- mapping it to "auto" is
+# a documented simplification; a proper preset_mode axis is future work, named not silently
+# dropped. The mapping lives here, at the HA-payload boundary, rather than by renaming this
+# bridge's own published vocabulary (a breaking change for anyone already consuming `hvac_mode`).
+_HVAC_MODE_TO_HA = {"off": "off", "eco": "auto", "heating": "heat", "cooling": "cool"}
+_HA_TO_HVAC_MODE = {ha: ours for ours, ha in _HVAC_MODE_TO_HA.items()}
 
 
 class DiscoveryError(Exception):
@@ -69,6 +78,11 @@ class ComponentContext:
 
 def _json_value_template(key: str) -> str:
     return f"{{{{ value_json.{key} }}}}"
+
+
+def _dict_lookup_template(mapping: Mapping[str, str], source: str, default: str) -> str:
+    pairs = ", ".join(f"'{key}': '{value}'" for key, value in mapping.items())
+    return f"{{{{ {{{pairs}}}.get({source}, '{default}') }}}}"
 
 
 def _sole_attribute(ctx: ComponentContext) -> str:
@@ -226,6 +240,17 @@ def build_climate(ctx: ComponentContext) -> dict[str, Any]:
         payload["temperature_command_topic"] = entity_set_attribute_topic(
             entity.state_topic, "setpoint_temperature"
         )
+    # "on_off" is exactly the discriminator between room_temperature_controller (has the
+    # RoomTemperatureControllerTransform's on_off/eco/mode inputs, docs/03 §7) and
+    # room_temperature_controller_basic (a bare setpoint with nothing to derive a mode from).
+    if "on_off" in entity.attr_names:
+        payload["mode_state_topic"] = entity.state_topic
+        payload["mode_state_template"] = _dict_lookup_template(
+            _HVAC_MODE_TO_HA, "value_json.hvac_mode", "off"
+        )
+        payload["modes"] = list(dict.fromkeys(_HVAC_MODE_TO_HA.values()))
+        payload["mode_command_topic"] = entity_set_attribute_topic(entity.state_topic, "hvac_mode")
+        payload["mode_command_template"] = _dict_lookup_template(_HA_TO_HVAC_MODE, "value", "off")
     return payload
 
 

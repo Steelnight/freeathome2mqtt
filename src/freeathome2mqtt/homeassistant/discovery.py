@@ -18,7 +18,7 @@ owned-state class in this codebase uses (`BridgeAvailability`, `CommandDispatche
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from itertools import chain
 from typing import TYPE_CHECKING, Any
 
@@ -111,6 +111,7 @@ def _build_entity_discovery(
     *,
     commands: frozenset[str],
     options: DiscoveryOptions,
+    override: Mapping[str, Any],
 ) -> tuple[tuple[str, bytes], ...]:
     component = profile.homeassistant.get("component")
     if component is None:
@@ -132,6 +133,8 @@ def _build_entity_discovery(
     if device_class is not None:
         payload["device_class"] = device_class
     payload.update(_common_envelope(ctx))
+    if override:
+        payload.update(override)  # entity/options {"homeassistant": {...}}, docs/04 §5
 
     object_id = entity.state_topic.rsplit("/", 1)[-1]
     topic = ha_discovery_config_topic(options.discovery_topic, component, entity.id, object_id)
@@ -139,16 +142,26 @@ def _build_entity_discovery(
 
 
 def build_model_discovery(
-    model: Model, profiles: ProfileRegistry, config: Configuration, options: DiscoveryOptions
+    model: Model,
+    profiles: ProfileRegistry,
+    config: Configuration,
+    options: DiscoveryOptions,
+    entity_overrides: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Model:
     """Pure: mutate every entity's `.discovery` (docs/03 §2's deliberately-not-frozen `Entity`)
     and return `model` with its own `.discovery` recomputed. When `options.enabled` is False every
     entity's `.discovery` becomes `()`, matching a fresh compile with Home Assistant off.
+
+    `entity_overrides` is `entity_id -> homeassistant option dict` (docs/04 §5's `entity/options`
+    `homeassistant` field, round-tripped through `entities.json`): each entity's own override, if
+    any, is shallow-merged on top of its auto-built payload before serialising, so a user can add
+    `device_class`/`entity_category`/etc per entity without a profile change.
     """
     devices = config.get("devices", {})
     commands_by_entity: dict[int, set[str]] = {}
     for entity_idx, command_name in model.egress:
         commands_by_entity.setdefault(entity_idx, set()).add(command_name)
+    overrides = entity_overrides or {}
 
     for entity in model.entities:
         if not options.enabled:
@@ -159,7 +172,13 @@ def build_model_discovery(
         channel = device.get("channels", {}).get(entity.channel_id, {})
         commands = frozenset(commands_by_entity.get(entity.idx, ()))
         entity.discovery = _build_entity_discovery(
-            entity, profile, channel, device, commands=commands, options=options
+            entity,
+            profile,
+            channel,
+            device,
+            commands=commands,
+            options=options,
+            override=overrides.get(entity.id, {}),
         )
 
     discovery = tuple(chain.from_iterable(entity.discovery for entity in model.entities))

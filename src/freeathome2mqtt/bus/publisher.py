@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 import orjson
 
 from freeathome2mqtt.model.entity import AttrKind, Entity
+from freeathome2mqtt.model.transforms import get_transform
 
 if TYPE_CHECKING:
     from freeathome2mqtt.bus.state import StateStore
@@ -51,7 +52,10 @@ class Publisher:
         self.publish_count = 0
 
     def build_payload(self, entity_idx: int) -> dict[str, Any]:
-        """The entity's complete state (docs/04 §2): `id`, every STATE attribute, `last_changed`."""
+        """The entity's complete state (docs/04 §2): `id`, every STATE attribute, any
+        transform-derived composite attribute (docs/03 §7, docs/05 R4 -- off the hot path, only
+        for entities that actually changed), and `last_changed`.
+        """
         entity = self._entities[entity_idx]
         values = self._state.values[entity_idx]
         payload: dict[str, Any] = {"id": entity.id}
@@ -59,6 +63,8 @@ class Publisher:
             if kind == AttrKind.EVENT:
                 continue
             payload[name] = value
+        if entity.transform is not None:
+            payload.update(get_transform(entity.transform).derive(values))
         if self._publish_last_changed:
             payload["last_changed"] = self._clock().isoformat(timespec="milliseconds")
         return payload

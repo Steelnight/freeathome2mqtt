@@ -10,7 +10,7 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
 **Read `docs/` before writing code.** This file governs *how* code gets written; `docs/` governs
 *what* gets built and in what order ([`docs/11-implementation-plan.md`](docs/11-implementation-plan.md)).
 
-**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP7`](docs/11-implementation-plan.md#wp7--commands-optimism-reconciliation) landed.**
+**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP8`](docs/11-implementation-plan.md#wp8--supervisor-lifecycle-resilience) landed.**
 
 - **WP0** — `pyproject.toml`/`ruff.toml`/strict `mypy`+`pytest` config, the package skeleton
   (docstring-only stubs), CI, the MIT licence decision.
@@ -76,10 +76,47 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
   false` opt-out. `bench_command_debounce` (P5) meets budget against the real pipeline (fake SysAP,
   a real broker, `MqttClient`, `RestClient`, `CommandDispatcher`) — 60 `/set` at 30 Hz over 2 s
   collapse to exactly 2 SysAP writes, matching docs/05 §4.2's canonical example.
+- **WP8** — `supervisor.py` (`Supervisor`: docs/02 §7 startup order — settings probe, MQTT connect
+  with LWT armed before anything risky (P-30), open the SysAP WebSocket and buffer *before*
+  fetching the configuration (P-22), fetch/compile/drain, publish discovery-then-state-then-
+  `bridge/state: online`; one `asyncio.TaskGroup` with a `restart_on_failure` shim — backoff+jitter
+  restart, escalating to `TaskDiedTooManyTimesError` after five failures whose starts are each
+  within 10 s of the previous one (P-29); resync/reload sharing one `_resync()` — a WS reconnect
+  triggers it immediately, a topology frame (`devices`/`devicesAdded`/`devicesRemoved`/
+  `parameters`, P-13) or `bridge/request/reload` goes through `_ReloadDebouncer` (2 s debounce, 30 s
+  minimum interval, reload-again flag instead of queueing, P-55), the periodic refresher hash-gates
+  before ever calling it; diffs the freshly-fetched snapshot against *live* state, not the old
+  model's initial values, so only entities that actually changed get republished (P-23), and
+  retracts any entity that disappeared; graceful shutdown per docs/08 §10 — stop accepting
+  commands, flush pending debounced writes (`CommandDispatcher.flush_pending`, new this WP), flush
+  the publisher, explicit `bridge/state: offline` (best-effort — a broker mid-reconnect at that
+  exact moment must not turn a clean shutdown into a crash), persist `entities.json`, close every
+  connection). `availability.py` (`BridgeAvailability`: ADR-008's `mqtt ∧ sysap ∧ model_loaded`,
+  grace-held offline transition, online only ever published explicitly by the caller so it can
+  never race ahead of discovery/state; `DeviceAvailabilityPublisher` for docs/06 §5.2's per-device
+  `unresponsive`/`defect` signal, retained and change-only). `persistence.py` (`EntitiesStore`:
+  alias/options/first_seen, versioned, atomic writes — temp file, `fsync`, `os.replace`, via the
+  executor). Two real WP5 bugs found and fixed along the way: `Publisher.flush()` used to clear the
+  *entire* dirty batch up front via `StateStore.take_dirty()`, so a broker outage mid-flush silently
+  dropped every entity not yet reached, including the one that actually failed (F6, docs/06 §6) —
+  it now discards an index only after that entity's own publish succeeds; and nothing re-triggered
+  a flush after an MQTT reconnect (`wake` may already be clear from the failed attempt), so
+  `MqttClient` gained `on_reconnected`/`on_disconnected` hooks — docs/08 §9's "publish the
+  accumulated dirty batch" is now an explicit reconnect-flow step, not something assumed to fall
+  out of the generic wake-loop. `WsReader` gained a matching `on_connected` hook so buffering can be
+  re-armed before any frame from a *reconnection* (not just the initial connect) can be dispatched,
+  closing the reconnect-variant of P-22. `bench_resync` (P8) meets budget against the real pipeline
+  — a short simulated outage stands in for docs/05 §8's literal 60 s, the same deviation
+  `bench_ingest` (WP6) documents for its own traffic window; the budget itself (≤1.5 s, exactly 1
+  config request) is outage-duration-independent. Deliberately not wired yet: HA discovery
+  publishing itself (WP10 — `model.discovery` is still always empty, so `_publish_discovery` is a
+  documented no-op the retraction/publish plumbing is already ready for), `bridge/devices`/
+  `bridge/info`/`reload`/rename (`mqtt/bridge_api.py`, WP9), and a `404`-on-write-triggers-resync
+  hook (docs/06 §4.1's last row — a real, named gap, not silently dropped).
 
-Every module below WP7 is still a docstring-only stub.
-[`docs/11 WP8`](docs/11-implementation-plan.md#wp8--supervisor-lifecycle-resilience) (supervisor,
-lifecycle, resilience) is next.
+Every module below WP8 is still a docstring-only stub.
+[`docs/11 WP9`](docs/11-implementation-plan.md#wp9--bridge-api-and-configuration) (bridge API,
+`settings.py`, `log.py`, `cli.py`, mDNS, virtual devices) is next.
 
 ---
 

@@ -19,6 +19,9 @@ from aiohttp import WSMsgType, web
 from aiohttp.test_utils import TestClient, TestServer
 
 DEFAULT_SYSAP_UUID = "00000000-0000-0000-0000-000000000000"
+DEFAULT_SETTINGS_VERSION = "2.6.4"
+DEFAULT_SERIAL_NUMBER = "ABB7005500E1"
+DEFAULT_SYSAP_NAME = "Fake House"
 
 
 @dataclass
@@ -61,8 +64,14 @@ class FakeSysAp:
         self._write_result = "OK"
         self._ws_clients: list[web.WebSocketResponse] = []
         self._ws_hung = False
+        self._settings_version = DEFAULT_SETTINGS_VERSION
+        self._serial_number = DEFAULT_SERIAL_NUMBER
+        self._settings_users: list[dict[str, str]] = [
+            {"name": "installer", "jid": "abc123@busch-jaeger.de"}
+        ]
 
         self.app = web.Application()
+        self.app.router.add_get("/settings.json", self._handle_settings)
         self.app.router.add_get("/fhapi/v1/api/rest/configuration", self._handle_configuration)
         self.app.router.add_get(
             "/fhapi/v1/api/rest/datapoint/{sysap}/{address}", self._handle_get_datapoint
@@ -88,6 +97,15 @@ class FakeSysAp:
                 datapoints[datapoint]["value"] = value
                 return
         raise KeyError(f"{serial}/{channel}/{datapoint} is not in the stored configuration")
+
+    # -------------------------------------------------------------- scripting: /settings.json
+
+    def set_settings_version(self, version: str) -> None:
+        """The firmware version `GET /settings.json` (unauthenticated, docs/01 §1.1) reports."""
+        self._settings_version = version
+
+    def set_serial_number(self, serial: str) -> None:
+        self._serial_number = serial
 
     # ------------------------------------------------------------------- scripting: HTTP quirks
 
@@ -192,6 +210,22 @@ class FakeSysAp:
 
     def _wrap(self, body: dict[str, Any]) -> dict[str, Any]:
         return {self.sysap_uuid: body}
+
+    async def _handle_settings(self, request: web.Request) -> web.Response:
+        """Unauthenticated, unversioned by `_track`/`_forced_status` -- this endpoint predates
+        `/fhapi/v1` entirely (docs/01 §1.1) and none of the request-count/error scripting is
+        meaningful for it.
+        """
+        return web.json_response(
+            {
+                "flags": {
+                    "version": self._settings_version,
+                    "serialNumber": self._serial_number,
+                    "name": DEFAULT_SYSAP_NAME,
+                },
+                "users": self._settings_users,
+            }
+        )
 
     async def _handle_configuration(self, request: web.Request) -> web.Response:
         async with self._track(request.path):

@@ -73,10 +73,17 @@ class Publisher:
             await self.flush()
 
     async def flush(self) -> None:
-        """Publish everything currently dirty, immediately, with no coalescing wait."""
-        batch = self._state.take_dirty()
-        for idx in sorted(batch):
+        """Publish everything currently dirty, immediately, with no coalescing wait.
+
+        Each index is only discarded from `dirty` *after* its own publish succeeds (docs/06 §6,
+        F6): a broker outage must never silently drop a change. Using `StateStore.take_dirty()`'s
+        unconditional clear here would lose every entity from the batch that had not yet been
+        reached the moment `mqtt.publish` raised -- this way they simply stay dirty for the next
+        flush, after reconnect, to retry.
+        """
+        for idx in sorted(self._state.dirty):
             entity = self._entities[idx]
             payload = orjson.dumps(self.build_payload(idx))
             await self._mqtt.publish(entity.state_topic, payload, qos=0, retain=True)
+            self._state.dirty.discard(idx)
             self.publish_count += 1

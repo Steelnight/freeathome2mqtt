@@ -40,6 +40,25 @@ async def test_configuration_is_served_wrapped_by_sysap_uuid() -> None:
         assert body[fake.sysap_uuid]["devices"][SERIAL]["displayName"] == "Ceiling Light"
 
 
+async def test_settings_json_is_served_unauthenticated() -> None:
+    async with running_fake_sysap(FakeSysAp()) as (_fake, client):
+        resp = await client.get("/settings.json")
+        body = await resp.json()
+        assert body["flags"]["version"] == "2.6.4"
+        assert body["flags"]["serialNumber"] == "ABB7005500E1"
+        assert body["users"] == [{"name": "installer", "jid": "abc123@busch-jaeger.de"}]
+
+
+async def test_settings_json_reflects_scripted_version_and_serial() -> None:
+    async with running_fake_sysap(FakeSysAp()) as (fake, client):
+        fake.set_settings_version("2.5.9")
+        fake.set_serial_number("ABB0000000AA")
+        resp = await client.get("/settings.json")
+        body = await resp.json()
+        assert body["flags"]["version"] == "2.5.9"
+        assert body["flags"]["serialNumber"] == "ABB0000000AA"
+
+
 async def test_set_datapoint_mutates_stored_configuration() -> None:
     async with running_fake_sysap(FakeSysAp(configuration=SAMPLE_CONFIG)) as (fake, client):
         fake.set_datapoint(SERIAL, "ch0003", "odp0000", "1")

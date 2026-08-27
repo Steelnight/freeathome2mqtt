@@ -9,12 +9,13 @@ import contextlib
 from datetime import UTC, datetime
 
 import orjson
+import pytest
 
 from fakes.fake_broker import running_fake_broker
 from freeathome2mqtt.bus.publisher import Publisher
 from freeathome2mqtt.bus.state import StateStore
 from freeathome2mqtt.model.entity import AttrKind, Entity
-from freeathome2mqtt.mqtt.client import MqttClient
+from freeathome2mqtt.mqtt.client import MqttClient, MqttClientNotConnectedError
 
 BASE = "freeathome2mqtt"
 
@@ -138,6 +139,47 @@ async def test_flush_clears_the_dirty_set() -> None:
             state.apply(0, 0, True)
             assert state.dirty == {0}
             await publisher.flush()
+            assert state.dirty == set()
+        finally:
+            await _stop(client, task)
+
+
+async def test_flush_keeps_unpublished_entities_dirty_when_mqtt_is_disconnected() -> None:
+    # docs/06 §6 F6, docs/08 §9: a broker outage must never silently drop a change. Before this
+    # fix, `flush()` cleared the whole dirty batch up front, so a publish failure partway through
+    # lost every entity not yet reached -- including the one that actually failed.
+    entities = [_entity(0, ("state",))]
+    state = StateStore(entities)
+    client = MqttClient(host="127.0.0.1", port=1, base_topic=BASE, sysap_serial="SERIAL")
+    publisher = Publisher(entities=entities, state=state, mqtt=client, publish_last_changed=False)
+    state.apply(0, 0, True)
+
+    with pytest.raises(MqttClientNotConnectedError):
+        await publisher.flush()
+
+    assert state.dirty == {0}
+
+
+async def test_flush_retries_a_previously_failed_entity_once_mqtt_reconnects() -> None:
+    entities = [_entity(0, ("state",))]
+    state = StateStore(entities)
+    doomed_client = MqttClient(host="127.0.0.1", port=1, base_topic=BASE, sysap_serial="SERIAL")
+    doomed_publisher = Publisher(
+        entities=entities, state=state, mqtt=doomed_client, publish_last_changed=False
+    )
+    state.apply(0, 0, True)
+    with pytest.raises(MqttClientNotConnectedError):
+        await doomed_publisher.flush()
+    assert state.dirty == {0}
+
+    async with running_fake_broker() as broker:
+        client, task = await _connected_client(broker)
+        try:
+            publisher = Publisher(
+                entities=entities, state=state, mqtt=client, publish_last_changed=False
+            )
+            await publisher.flush()  # the same dirty mark, retried once mqtt is real
+            await _wait_until(lambda: broker.retained_messages.get(f"{BASE}/test0") is not None)
             assert state.dirty == set()
         finally:
             await _stop(client, task)

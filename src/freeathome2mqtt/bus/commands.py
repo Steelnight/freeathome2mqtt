@@ -10,6 +10,7 @@ message dispatch.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
@@ -86,9 +87,39 @@ class CommandDispatcher:
         self._last_sent: dict[tuple[int, str], str] = {}
         self._windows: dict[tuple[int, str], asyncio.Task[None]] = {}
         self._tasks: set[asyncio.Task[None]] = set()
+        self._accepting = True
+
+    def stop_accepting(self) -> None:
+        """Shutdown step 1 (docs/08 §10): ignore every message from here on. A command already
+        dispatched to a background task is unaffected -- `flush_pending` is what settles those.
+        """
+        self._accepting = False
+
+    async def flush_pending(self, *, deadline_s: float = 2.0) -> None:
+        """Shutdown step 2 (docs/08 §10): send whatever is still sitting in an open debounce
+        window right now, bounded by `deadline_s` -- a value the user just set must not be
+        silently dropped, but shutdown cannot wait indefinitely for a slider still being dragged.
+        """
+        for key in list(self._windows):
+            window = self._windows.pop(key, None)
+            if window is not None:
+                window.cancel()
+            pending = self._pending.pop(key, None)
+            binding = self._egress.get(key)
+            if pending is None or binding is None:
+                continue
+            self._send(key, pending, binding, None)
+        pending_tasks = list(self._tasks)
+        if not pending_tasks:
+            return
+        with contextlib.suppress(TimeoutError):
+            async with asyncio.timeout(deadline_s):
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
 
     def on_message(self, message: aiomqtt.Message) -> None:
         """Parse the topic only; everything else runs in a tracked background task."""
+        if not self._accepting:
+            return
         parsed = self._parse_topic(str(message.topic))
         if parsed is None:
             return

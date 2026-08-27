@@ -115,6 +115,68 @@ async def test_ws_reconnects_after_clean_close() -> None:
             await asyncio.wait_for(task, timeout=5.0)
 
 
+async def test_on_connected_fires_before_each_connection_can_dispatch_a_frame() -> None:
+    connected_count = 0
+
+    def _on_connected() -> None:
+        nonlocal connected_count
+        connected_count += 1
+
+    received = []
+    async with running_fake_sysap(FakeSysAp()) as (fake, client):
+        reader = _reader_for(
+            client,
+            on_frame=received.append,
+            on_connected=_on_connected,
+            backoff_initial=0.01,
+            backoff_cap=0.02,
+        )
+        task = asyncio.create_task(reader.run())
+        try:
+            await _wait_until(lambda: reader.reconnect_count >= 1)
+            await _wait_until(lambda: connected_count >= 1)
+            assert connected_count == 1
+
+            await fake.drop_websocket()
+            await _wait_until(lambda: reader.reconnect_count >= 2, timeout_seconds=5.0)
+            await _wait_until(lambda: connected_count >= 2)
+            assert connected_count == 2
+        finally:
+            await reader.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_on_connected_can_arm_buffering_before_any_frame_is_dispatched() -> None:
+    # The real use case (docs/02 §7): re-arming buffering from inside `on_connected` closes the
+    # reconnect-variant of P-22 -- a frame pushed the instant a connection opens must never reach
+    # `on_frame` before the caller has had a chance to decide it should be buffered instead.
+    received: list[object] = []
+    reader_holder: list[WsReader] = []
+
+    def _arm_buffering() -> None:
+        reader_holder[0].start_buffering()
+
+    async with running_fake_sysap(FakeSysAp()) as (fake, client):
+        reader = _reader_for(
+            client,
+            on_frame=received.append,
+            on_connected=_arm_buffering,
+            backoff_initial=0.01,
+            backoff_cap=0.02,
+        )
+        reader_holder.append(reader)
+        task = asyncio.create_task(reader.run())
+        try:
+            await _wait_until(lambda: reader.reconnect_count >= 1)
+            await fake.push_ws_frame({"datapoints": {"a": "1"}})
+            await _wait_until(lambda: reader.buffered_frame_count >= 1)
+            assert received == []
+            assert reader.drain_buffer() == [{"datapoints": {"a": "1"}}]
+        finally:
+            await reader.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
 async def test_buffering_holds_frames_until_drained() -> None:
     received = []
     async with running_fake_sysap(FakeSysAp()) as (fake, client):

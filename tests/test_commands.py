@@ -416,6 +416,37 @@ async def test_continuous_command_debounces_leading_and_trailing_edge() -> None:
         assert env.fake.request_count(path) == 2  # 20 was collapsed into pending, never sent
 
 
+async def test_stop_accepting_ignores_further_messages() -> None:
+    # docs/08 §10 step 1: shutdown stops routing new commands, without touching MQTT itself.
+    async with _environment() as env:
+        path = _dp_path(f"{SERIAL}.ch0000.idp0000")
+        env.dispatcher.stop_accepting()
+        await env.outsider.publish(f"{BASE}/switch/set", orjson.dumps({"state": True}))
+        await asyncio.sleep(0.1)
+        assert env.fake.request_count(path) == 0
+
+
+async def test_flush_pending_sends_the_settled_value_of_an_open_debounce_window() -> None:
+    # docs/08 §10 step 2: a value the user just set must not be silently dropped at shutdown.
+    async with _environment(debounce_s=5.0) as env:
+        path = _dp_path(f"{SERIAL}.ch0001.idp0011")
+        await env.outsider.publish(f"{BASE}/dimmer/set", orjson.dumps({"brightness": 10}))
+        await _wait_until(lambda: env.fake.request_count(path) >= 1)  # leading edge
+        await env.outsider.publish(f"{BASE}/dimmer/set", orjson.dumps({"brightness": 42}))
+        await asyncio.sleep(0.05)  # let the dispatcher's background task collapse it into pending
+        assert env.fake.request_count(path) == 1  # collapsed into `pending`, window still open
+
+        await env.dispatcher.flush_pending(deadline_s=2.0)
+
+        assert env.fake.request_count(path) == 2
+        assert _input_value(env.fake, "ch0001", "idp0011") == "42"
+
+
+async def test_flush_pending_is_a_noop_with_nothing_pending() -> None:
+    async with _environment() as env:
+        await env.dispatcher.flush_pending(deadline_s=2.0)  # must not raise or hang
+
+
 async def test_discrete_command_is_never_debounced() -> None:
     # A window long enough to catch a wrongly-debounced discrete command.
     async with _environment(debounce_s=1.0) as env:

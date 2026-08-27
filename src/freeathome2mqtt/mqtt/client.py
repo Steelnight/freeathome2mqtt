@@ -18,7 +18,7 @@ import asyncio
 import contextlib
 import logging
 import random
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from ssl import SSLContext
 
 import aiomqtt
@@ -64,6 +64,8 @@ class MqttClient:
         backoff_cap: float = 60.0,
         retained_republish_delay: float = 2.0,
         on_message: OnMessage | None = None,
+        on_reconnected: Callable[[], Awaitable[None]] | None = None,
+        on_disconnected: Callable[[], None] | None = None,
     ) -> None:
         self._host = host
         self._port = port
@@ -74,6 +76,8 @@ class MqttClient:
         self._tls_context = tls_context
         self._keepalive = keepalive
         self._on_message = on_message
+        self._on_reconnected = on_reconnected
+        self._on_disconnected = on_disconnected
         self._backoff_initial = backoff_initial
         self._backoff_factor = backoff_factor
         self._backoff_cap = backoff_cap
@@ -188,10 +192,17 @@ class MqttClient:
             finally:
                 self._cancel_republish_task()
                 self._client = None
+                if self._on_disconnected is not None:
+                    self._on_disconnected()
 
     async def _on_connected(self, client: aiomqtt.Client) -> None:
         for topic in self._subscriptions:
             await client.subscribe(topic)
+        if self._on_reconnected is not None:
+            # docs/08 §9: republishing the accumulated dirty batch is an explicit step of the
+            # reconnect flow, not something a generic wake-loop can be relied on to do by itself
+            # -- `wake` may already be clear from a publish attempt that failed while disconnected.
+            await self._on_reconnected()
         self._cancel_republish_task()
         self._republish_task = asyncio.create_task(self._delayed_republish_retained())
 

@@ -58,6 +58,7 @@ class WsReader:
         session: aiohttp.ClientSession,
         ssl: ssl.SSLContext | bool = True,
         on_frame: Callable[[WsFrameBody], None] | None = None,
+        on_connected: Callable[[], None] | None = None,
         heartbeat: float | None = 30.0,
         idle_timeout: float = 90.0,
         backoff_initial: float = 1.0,
@@ -70,6 +71,7 @@ class WsReader:
         self._session = session
         self._ssl = ssl
         self._on_frame = on_frame
+        self._on_connected = on_connected
         self._heartbeat = heartbeat
         self._idle_timeout = idle_timeout
         self._backoff_initial = backoff_initial
@@ -147,6 +149,11 @@ class WsReader:
             self._ws = ws
             self.reconnect_count += 1
             self.backoff_attempt = 0  # reset on every successful (re)connect, not on return
+            if self._on_connected is not None:
+                # Fired synchronously, before any frame from this connection can reach
+                # `_receive_loop` (docs/02 §7): the caller's only safe window to arm buffering
+                # again after a reconnect, closing the reconnect-variant of P-22.
+                self._on_connected()
             try:
                 await self._receive_loop(ws)
             finally:

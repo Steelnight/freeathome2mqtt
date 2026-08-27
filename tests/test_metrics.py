@@ -11,6 +11,8 @@ def test_all_counters_start_at_zero() -> None:
     assert metrics.unmapped_datapoints == 0
     assert metrics.events == 0
     assert metrics.codec_errors == 0
+    assert metrics.task_restarts == 0
+    assert metrics.config_reloads == 0
 
 
 def test_counters_are_independently_mutable() -> None:
@@ -19,9 +21,13 @@ def test_counters_are_independently_mutable() -> None:
     metrics.unmapped_datapoints += 1
     metrics.events += 2
     metrics.codec_errors += 3
+    metrics.task_restarts += 4
+    metrics.config_reloads += 6
     assert (
         metrics.datapoints_in,
         metrics.unmapped_datapoints,
         metrics.events,
         metrics.codec_errors,
-    ) == (5, 1, 2, 3)
+        metrics.task_restarts,
+        metrics.config_reloads,
+    ) == (5, 1, 2, 3, 4, 6)

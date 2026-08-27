@@ -3,7 +3,7 @@
 A high-performance bridge between an **ABB / Busch-Jaeger free@home** System Access Point (SysAP)
 and **MQTT**.
 
-> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP7](docs/11-implementation-plan.md#wp7--commands-optimism-reconciliation)
+> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP8](docs/11-implementation-plan.md#wp8--supervisor-lifecycle-resilience)
 > landed.** Bootstrap tooling, the generated pairing/function/parameter/interface code tables, the
 > SysAP settings pre-flight, the capture tool's pseudonymisation, the `minimal`/`typical`/`nasty`
 > configuration fixtures, a real SysAP client (`RestClient`, `WsReader` against a from-scratch fake
@@ -22,12 +22,21 @@ and **MQTT**.
 > validate-then-clamp; leading+trailing debounce with reset-on-each-message semantics so a held
 > slider costs one extra write regardless of drag length, docs/05 §4.2; rate-limited `/get`) and
 > `Reconciler` (ADR-012's optimistic-write safety net: a 3 s per-attribute timer that self-cancels
-> on a confirming WS echo, one targeted read and a rollback otherwise). 100% of the `typical.json`
-> fixture's channels match a profile (floor: 85%); `bench_latency`/`bench_ingest`/
-> `bench_command_debounce` all meet their P1–P5 budgets against the real pipeline. The documents
-> under [`docs/`](docs/) are written to be executed by an implementing agent (human or AI) top to
-> bottom, and [WP8](docs/11-implementation-plan.md#wp8--supervisor-lifecycle-resilience)
-> (supervisor, lifecycle, resilience) is next.
+> on a confirming WS echo, one targeted read and a rollback otherwise) — and now the supervisor:
+> `Supervisor` (docs/02 §7 startup order — LWT armed before the SysAP is ever touched, the
+> WebSocket buffers before the configuration is fetched, then discovery-then-state-then-online;
+> one `asyncio.TaskGroup` with a restart-with-backoff shim that escalates and exits the process
+> after five rapid failures; resync on a WS reconnect, a debounced topology change, or a periodic
+> hash-gated refresh, publishing only what actually changed and retracting entities that
+> disappeared; a graceful shutdown that flushes pending commands and state before an explicit
+> `bridge/state: offline`), `BridgeAvailability`/`DeviceAvailabilityPublisher` (ADR-008's
+> end-to-end health signal plus per-device `unresponsive`/`defect`), and `EntitiesStore`
+> (versioned, atomically-written `entities.json`). 100% of the `typical.json` fixture's channels
+> match a profile (floor: 85%); `bench_latency`/`bench_ingest`/`bench_command_debounce`/
+> `bench_resync` all meet their P1–P8 budgets against the real pipeline. The documents under
+> [`docs/`](docs/) are written to be executed by an implementing agent (human or AI) top to bottom,
+> and [WP9](docs/11-implementation-plan.md#wp9--bridge-api-and-configuration) (bridge API,
+> settings, logging, CLI) is next.
 
 ---
 

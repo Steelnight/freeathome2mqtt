@@ -20,16 +20,20 @@ import pytest
 from fakes.fake_broker import free_port, running_fake_broker
 from fakes.fake_sysap import FakeSysAp, running_fake_sysap
 from freeathome2mqtt.metrics import Metrics
-from freeathome2mqtt.model.compiler import CompileStats, Model
+from freeathome2mqtt.model.compiler import CompileOptions, CompileStats, Model
+from freeathome2mqtt.model.compiler import compile as compile_model
 from freeathome2mqtt.model.entity import AttrKind, Entity
 from freeathome2mqtt.model.profiles import load_profile_registry
 from freeathome2mqtt.mqtt.bridge_api import BridgeApiError
+from freeathome2mqtt.mqtt.client import MqttClient
 from freeathome2mqtt.supervisor import (
     _ESCALATION_THRESHOLD,
     Supervisor,
     SupervisorConfig,
     TaskDiedTooManyTimesError,
+    _build_bridge_devices,
     _ReloadDebouncer,
+    _split_devices_payload,
     restart_on_failure,
 )
 from freeathome2mqtt.sysap.rest import AuthenticationError, ServerOverloadedError
@@ -953,6 +957,186 @@ async def test_retract_entity_skips_absent_availability_and_retracts_discovery(
             await asyncio.wait_for(task, timeout=5.0)
 
 
+# ---------------------------------------------------------------------------- bridge/devices
+
+
+def _bridge_devices_config() -> dict[str, Any]:
+    return _configuration(
+        {
+            SERIAL: {
+                "displayName": "Living Room Switch",
+                "deviceId": "910C",
+                "articleNumber": "6224/xx-500",
+                "interface": "TP",
+                "unresponsive": False,
+                "defect": False,
+                # Deliberately no device-level floor/room: ch0000/ch0001 declare their own, and
+                # ch0002 must NOT inherit one, or it would not be the orphaned channel this
+                # fixture needs it to be.
+                "channels": {
+                    "ch0000": {
+                        "displayName": "Switch",
+                        "functionID": "7",  # FID_SWITCH_ACTUATOR -- supported
+                        "inputs": {"idp0000": {"pairingID": 1, "value": "0"}},
+                        "outputs": {"odp0000": {"pairingID": 256, "value": "1"}},
+                        "floor": "01",
+                        "room": "01",
+                    },
+                    "ch0001": {
+                        "displayName": "Mystery",
+                        "functionID": "fff",  # not a known Function
+                        "outputs": {},
+                        "floor": "01",
+                        "room": "01",
+                    },
+                    "ch0002": {
+                        "displayName": "Orphan",
+                        "functionID": "7",
+                        "outputs": {"odp0000": {"pairingID": 256, "value": "1"}},
+                        # no floor/room -- orphaned
+                    },
+                },
+            }
+        }
+    )
+
+
+def _compiled_bridge_devices_model() -> Model:
+    return compile_model(_bridge_devices_config(), REGISTRY, CompileOptions(topic_prefix=BASE))
+
+
+def test_build_bridge_devices_marks_the_matching_channel_supported() -> None:
+    model = _compiled_bridge_devices_model()
+    devices = _build_bridge_devices(_bridge_devices_config(), model, REGISTRY)
+    assert len(devices) == 1
+    device = devices[0]
+    assert device["serial"] == SERIAL
+    assert device["name"] == "Living Room Switch"
+    assert device["device_id"] == "910C"
+    assert device["area"] is None  # no device-level floor/room in this fixture
+
+    channels = {c["channel_id"]: c for c in device["channels"]}
+    assert channels["ch0000"]["supported"] is True
+    assert channels["ch0000"]["entity_id"] == f"{SERIAL}_ch0000"
+    assert channels["ch0000"]["profile"] == "switch_actuator"
+    assert channels["ch0000"]["function"] == "FID_SWITCH_ACTUATOR"
+    assert channels["ch0000"]["attributes"] == [
+        {"name": "state", "codec": "bool01", "kind": "state"}
+    ]
+    assert channels["ch0000"]["commands"] == [{"name": "state", "continuous": False}]
+
+
+def test_build_bridge_devices_resolves_device_level_area() -> None:
+    config = _configuration({SERIAL: _switch_device(SERIAL)})
+    model = compile_model(config, REGISTRY, CompileOptions(topic_prefix=BASE))
+    devices = _build_bridge_devices(config, model, REGISTRY)
+    assert devices[0]["area"] == "Living Room"
+
+
+def test_build_bridge_devices_reports_unknown_function_reason() -> None:
+    model = _compiled_bridge_devices_model()
+    devices = _build_bridge_devices(_bridge_devices_config(), model, REGISTRY)
+    channels = {c["channel_id"]: c for c in devices[0]["channels"]}
+    assert channels["ch0001"]["supported"] is False
+    assert channels["ch0001"]["function"] is None
+    assert channels["ch0001"]["reason"] == "unknown function ID"
+
+
+def test_build_bridge_devices_reports_orphaned_channel_reason() -> None:
+    model = _compiled_bridge_devices_model()
+    devices = _build_bridge_devices(_bridge_devices_config(), model, REGISTRY)
+    channels = {c["channel_id"]: c for c in devices[0]["channels"]}
+    assert channels["ch0002"]["supported"] is False
+    assert "orphaned" in channels["ch0002"]["reason"]
+
+
+def test_split_devices_payload_fits_in_one_part_below_the_limit() -> None:
+    devices = [{"serial": f"S{i}"} for i in range(5)]
+    parts = _split_devices_payload(devices, max_size=1_000_000)
+    assert len(parts) == 1
+
+
+def test_split_devices_payload_splits_when_it_would_exceed_the_limit() -> None:
+    devices = [{"serial": f"S{i}", "padding": "x" * 100} for i in range(50)]
+    small_limit = 500
+    parts = _split_devices_payload(devices, max_size=small_limit)
+    assert len(parts) > 1
+    for part in parts:
+        # each part fits, except possibly a single-device part that alone exceeds the limit --
+        # not exercised here since no single device is that large.
+        assert len(part) <= small_limit
+
+
+def test_split_devices_payload_never_drops_a_device() -> None:
+    devices = [{"serial": f"S{i}"} for i in range(20)]
+    parts = _split_devices_payload(devices, max_size=80)
+    total = sum(len(orjson.loads(p)) for p in parts)
+    assert total == len(devices)
+
+
+async def test_publish_bridge_devices_publishes_a_single_topic_when_it_fits(tmp_path: Path) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as observer:
+                await observer.subscribe(f"{BASE}/bridge/devices")
+                async with asyncio.timeout(5.0):
+                    msg = await anext(aiter(observer.messages))
+                body = orjson.loads(msg.payload)
+                assert isinstance(body, list)
+                assert body[0]["serial"] == SERIAL
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_publish_bridge_devices_splits_when_over_the_configured_packet_size(
+    tmp_path: Path,
+) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        many_devices = {
+            f"ABB7F5{i:06X}": _switch_device(f"ABB7F5{i:06X}", name=f"Switch {i}")
+            for i in range(20)
+        }
+        fake.set_configuration(_configuration(many_devices))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client, mqtt_maximum_packet_size=400),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as observer:
+                await observer.subscribe(f"{BASE}/bridge/devices")
+                await observer.subscribe(f"{BASE}/bridge/devices/+")
+                seen: dict[str, bytes] = {}
+                async with asyncio.timeout(5.0):
+                    async for message in observer.messages:
+                        seen[str(message.topic)] = message.payload
+                        if f"{BASE}/bridge/devices" in seen and any("devices/" in t for t in seen):
+                            break
+                index = orjson.loads(seen[f"{BASE}/bridge/devices"])
+                assert "parts" in index
+                assert len(index["parts"]) >= 2
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
 # ---------------------------------------------------------------------------- _diff_and_apply
 
 
@@ -1477,6 +1661,169 @@ async def test_discovery_republish_succeeds_once_started(tmp_path: Path) -> None
         finally:
             await supervisor.stop()
             await asyncio.wait_for(task, timeout=5.0)
+
+
+# -------------------------------------------------------------- Home Assistant discovery lifecycle
+
+
+async def test_removed_entities_are_retracted(tmp_path: Path) -> None:
+    # P-35's cross-restart case: a device removed while the bridge was NOT running must still
+    # get its discovery topic retracted on the next start, via discovery.json (docs/07 §4.2) --
+    # the in-memory old-model-vs-new-model diff can't see it since there is no old model yet.
+    other_serial = "ABB7F500E999"
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(
+            _configuration(
+                {SERIAL: _switch_device(SERIAL), other_serial: _switch_device(other_serial)}
+            )
+        )
+        config = _config(tmp_path, broker.port, http_client)
+        supervisor = Supervisor(config=config, profiles=REGISTRY, http_session=http_client.session)
+        task = asyncio.create_task(supervisor.run())
+        await _wait_until(lambda: supervisor._cold_start_done)
+        assert supervisor._model is not None
+        other_idx = supervisor._model.by_id[f"{other_serial}_ch0000"]
+        removed_topic = supervisor._model.entities[other_idx].discovery[0][0]
+        await supervisor.stop()
+        await asyncio.wait_for(task, timeout=5.0)
+
+    # A fresh process: same data_dir (discovery.json survives), but the SysAP no longer has
+    # `other_serial` -- exactly what "removed while the bridge was down" looks like.
+    async with (
+        running_fake_broker(port=broker.port) as broker2,
+        running_fake_sysap(FakeSysAp()) as (fake2, http_client2),
+    ):
+        fake2.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        config2 = _config(tmp_path, broker2.port, http_client2)
+        supervisor2 = Supervisor(
+            config=config2, profiles=REGISTRY, http_session=http_client2.session
+        )
+        task2 = asyncio.create_task(supervisor2.run())
+        try:
+            async with aiomqtt.Client("127.0.0.1", port=broker2.port) as observer:
+                await observer.subscribe(removed_topic)
+                async with asyncio.timeout(5.0):
+                    msg = await anext(aiter(observer.messages))
+                assert msg.payload == b""
+        finally:
+            await supervisor2.stop()
+            await asyncio.wait_for(task2, timeout=5.0)
+
+
+async def test_ha_birth_triggers_republish(tmp_path: Path) -> None:
+    # P-36's named test: homeassistant/status: "online" must trigger a discovery republish.
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(
+                tmp_path, broker.port, http_client, homeassistant_republish_delay_s=0.05
+            ),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            assert supervisor._model is not None
+            topic = supervisor._model.discovery[0][0]
+
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as observer:
+                await observer.subscribe(topic)
+                async with asyncio.timeout(5.0):
+                    async_iter = aiter(observer.messages)
+                    await anext(async_iter)  # the cold-start publish
+
+                    async with aiomqtt.Client("127.0.0.1", port=broker.port) as sender:
+                        await sender.publish("homeassistant/status", b"online")
+
+                    msg = await anext(async_iter)  # the birth-triggered republish
+                assert msg.payload == supervisor._model.discovery[0][1]
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_ha_birth_republish_is_delayed(tmp_path: Path) -> None:
+    # P-37's named test: the republish must wait `republish_delay_s`, not fire instantly.
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client, homeassistant_republish_delay_s=1.0),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            assert supervisor._model is not None
+            topic = supervisor._model.discovery[0][0]
+
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as observer:
+                await observer.subscribe(topic)
+                async with asyncio.timeout(5.0):
+                    async_iter = aiter(observer.messages)
+                    await anext(async_iter)  # the cold-start publish
+
+                    async with aiomqtt.Client("127.0.0.1", port=broker.port) as sender:
+                        await sender.publish("homeassistant/status", b"online")
+
+                    start = time.monotonic()
+                    await anext(async_iter)  # the birth-triggered republish
+                    elapsed = time.monotonic() - start
+                assert elapsed >= 0.5  # comfortably below the 1.0s delay but not instant
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_initial_publish_is_sequential(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # P-49's named test: the cold-start flood of discovery + state publishes must never overlap
+    # (Mosquitto's default in-flight window is 20; `asyncio.gather`-ing 1000s of them would hang).
+    concurrent = 0
+    max_concurrent = 0
+    original_publish = MqttClient.publish
+
+    async def _tracking_publish(self: MqttClient, *args: Any, **kwargs: Any) -> None:
+        nonlocal concurrent, max_concurrent
+        concurrent += 1
+        max_concurrent = max(max_concurrent, concurrent)
+        try:
+            await original_publish(self, *args, **kwargs)
+        finally:
+            concurrent -= 1
+
+    monkeypatch.setattr(MqttClient, "publish", _tracking_publish)
+
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        devices = {f"ABB7F5{i:06X}": _switch_device(f"ABB7F5{i:06X}") for i in range(20)}
+        fake.set_configuration(_configuration(devices))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+    assert max_concurrent == 1
 
 
 # ------------------------------------------------------------ log_level, health, bridge_info

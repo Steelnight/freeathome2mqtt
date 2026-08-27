@@ -10,7 +10,7 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
 **Read `docs/` before writing code.** This file governs *how* code gets written; `docs/` governs
 *what* gets built and in what order ([`docs/11-implementation-plan.md`](docs/11-implementation-plan.md)).
 
-**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP9`](docs/11-implementation-plan.md#wp9--bridge-api-and-configuration) landed.**
+**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP10`](docs/11-implementation-plan.md#wp10--home-assistant-discovery) landed.**
 
 - **WP0** — `pyproject.toml`/`ruff.toml`/strict `mypy`+`pytest` config, the package skeleton
   (docstring-only stubs), CI, the MIT licence decision.
@@ -31,7 +31,7 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
   order); `model/compiler.py` (the pure `compile()`: floor/room resolution, interface and orphan
   filtering, profile matching with deterministic tie-breaks, P-01/P-02 input/output miswiring
   guards, codec binding); `tests/bench/test_bench_compile.py` (`bench_compile`, P7).
-- **WP4** — 13 tier-1 profiles across `profiles/{lighting,covers,climate,sensors}.yaml`; the
+- **WP4** — 15 tier-1 profiles across `profiles/{lighting,covers,climate,sensors}.yaml`; the
   `color_temp_pct` channel-parameter special case added to `model/compiler.py` (P-09, reading
   `PID_TEMPERATURE_COLOR_PHYSICAL_WARMEST`/`_COOLEST` per entity); `model/transforms.py`'s closed
   `@transform` registry with `room_temperature_controller` and `cover_with_slats`; round-trip
@@ -136,9 +136,10 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
   config.yaml schema as nested pydantic models, `FAH2MQTT_<SECTION>__<KEY>` env overrides,
   `!env`/`!secret`/`!file` YAML tags, the docs/07 §2.2 semantic-validation table, and
   `settings_to_supervisor_config()` — the one-way translator `SupervisorConfig`'s own WP8 docstring
-  promised; several documented knobs have no runtime effect yet — `mqtt.version`, `homeassistant.*`
-  (WP10), `entities.exclude`/`include`, adaptive coalescing, `advanced.metrics` — each a named,
-  accepted-and-validated-but-not-yet-enforced gap, not a silent drop); `sysap/mdns.py` (zeroconf
+  promised; several documented knobs have no runtime effect yet — `mqtt.version`,
+  `entities.exclude`/`include`, adaptive coalescing, `advanced.metrics` — each a named,
+  accepted-and-validated-but-not-yet-enforced gap, not a silent drop (`homeassistant.*` was one of
+  these too, until WP10 wired it); `sysap/mdns.py` (zeroconf
   discovery of `free@home*` `_http._tcp.local.` services, tested against a real loopback multicast
   round trip rather than a mock); `cli.py`/`__main__.py` (`--check-config`, `--discover`,
   `--capture`, `--dry-run` — via a new `Supervisor.dry_run()` that probes/fetches/compiles and
@@ -152,9 +153,50 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
   fetched configuration and every captured frame under the resolved `sysap_uuid` before handing
   them to `capture()`. Closes P-16, P-33, P-44, P-45.
 
-Every module below WP9 is still a docstring-only stub.
-[`docs/11 WP10`](docs/11-implementation-plan.md#wp10--home-assistant-discovery) (Home Assistant
-discovery) is next.
+- **WP10** — Home Assistant MQTT discovery (docs/04 §6). `homeassistant/components.py` (per-HA-
+  platform pure payload builders — `switch`/`light`/`cover`/`binary_sensor`/`sensor`/`number`/
+  `climate`/`event` — dispatched via a closed `COMPONENT_BUILDERS` dict keyed by each profile's new
+  `homeassistant: {component, device_class}` YAML block, the same reviewed-registry pattern
+  `model/transforms.py`'s `@transform` already established; `light`'s `schema: "json"` payload
+  reuses HA's own JSON light schema keys directly, since our `state`/`brightness`/`color_temp`
+  attribute names already match them, Kelvin bounds included since our `color_temp_pct` codec
+  already operates in Kelvin) and `homeassistant/discovery.py` (`build_model_discovery()`: a pure
+  function run *after* `compile()`, not inside it — `Entity` was deliberately left non-frozen back
+  in WP3 specifically so this could mutate `.discovery` in place, matching docs/02's own `TBL -.->
+  HAD` architecture diagram; `DiscoveryPublisher`: changed-only publish backed by the new
+  `persistence.DiscoveryStore` — `discovery.json`, docs/07 §4.2 — so a restart with an unchanged
+  installation publishes zero discovery messages, plus a force-everything path for `discovery/
+  republish` and the delayed HA-birth republish). `supervisor.py`: discovery build/publish/retract
+  now wired into `_startup`/`_resync`/`dry_run` via one shared `_compile_and_build_discovery()`;
+  cross-restart stale-topic retraction on the very first compile (the in-memory old-model-vs-new-
+  model diff `_diff_and_apply` already did can't see removals from *before* this process started);
+  subscribing to the HA birth topic (`MqttClient` already had the `homeassistant_discovery_topic`
+  parameter, unused until now) and republishing after `republish_delay_s`, never instantly (P-37);
+  `bridge/devices` (docs/04 §4.3) built fresh this WP — per-device/per-channel inventory including
+  *unsupported* channels with their raw function IDs, split into indexed `bridge/devices/<n>` parts
+  with an index message when it would exceed `mqtt.maximum_packet_size` (P-41) — a documented
+  simplification versus a full compiler-internal reconstruction: unsupported-channel reasons are
+  bucketed (orphaned / unknown function / no profile match) rather than naming exactly which
+  profiles almost matched. `settings.py` now actually threads `homeassistant.*` and
+  `mqtt.maximum_packet_size` into `SupervisorConfig` (previously accepted-and-validated only).
+  `bench_startup` (P6, a 1000-channel cold start to `bridge/state: online`) meets budget with
+  comfortable headroom. One real bug found and fixed along the way, needed for Home Assistant's
+  JSON light schema to actually turn lights off: `model/codecs.py`'s `_encode_bool01` did
+  `"1" if value else "0"`, and HA's JSON light schema sends `{"state": "OFF"}` — a non-empty
+  string, which plain Python truthiness always reads as `True`. Deliberately *not* wired, and
+  named rather than silently dropped: `model/transforms.py`'s `RoomTemperatureControllerTransform`
+  (a pre-existing WP4 gap) still isn't called anywhere in `bus/`, so `climate` discovery omits mode
+  topics entirely rather than pointing Home Assistant at a topic that would never publish or accept
+  a value; per-entity `homeassistant`/`optimistic`/`debounce_ms` overrides from `entity/options`
+  still round-trip through `entities.json` without being consulted (installation-wide settings
+  only, same gap `entity/options`'s own WP9 docstring already named for `optimistic`/
+  `debounce_ms`); and `homeassistant.legacy_entity_attributes` stays accepted-and-validated only —
+  its exact intended shape is not specified anywhere in docs/04 §6. Closes P-34, P-35, P-36, P-37,
+  P-41, P-49.
+
+Every module below WP10 is still a docstring-only stub.
+[`docs/11 WP11`](docs/11-implementation-plan.md#wp11--tier-23-profiles-and-raw-mode) (tier-2/3
+profiles and raw mode) is next.
 
 ---
 

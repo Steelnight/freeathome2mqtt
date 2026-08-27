@@ -12,6 +12,7 @@ import pytest
 
 from freeathome2mqtt.persistence import (
     CURRENT_VERSION,
+    DiscoveryStore,
     EntitiesStore,
     PersistenceError,
     atomic_write,
@@ -120,6 +121,58 @@ def test_unknown_entity_ids_are_retained_across_a_reload(tmp_path: Path) -> None
     store = EntitiesStore(path)
     store.load()
     assert store.alias_for("ABB_ch9999") == "spare_room"
+
+
+# ------------------------------------------------------------------------------- DiscoveryStore
+
+
+def test_discovery_store_load_on_a_missing_file_leaves_hashes_empty(tmp_path: Path) -> None:
+    store = DiscoveryStore(tmp_path / "discovery.json")
+    store.load()
+    assert store.hashes == {}
+
+
+def test_discovery_store_is_changed_true_for_an_unseen_topic(tmp_path: Path) -> None:
+    store = DiscoveryStore(tmp_path / "discovery.json")
+    assert store.is_changed("homeassistant/switch/x/config", b'{"a":1}') is True
+
+
+def test_discovery_store_mark_then_is_changed_is_false_for_the_same_payload(tmp_path: Path) -> None:
+    store = DiscoveryStore(tmp_path / "discovery.json")
+    store.mark("homeassistant/switch/x/config", b'{"a":1}')
+    assert store.is_changed("homeassistant/switch/x/config", b'{"a":1}') is False
+
+
+def test_discovery_store_is_changed_true_for_a_different_payload(tmp_path: Path) -> None:
+    store = DiscoveryStore(tmp_path / "discovery.json")
+    store.mark("homeassistant/switch/x/config", b'{"a":1}')
+    assert store.is_changed("homeassistant/switch/x/config", b'{"a":2}') is True
+
+
+def test_discovery_store_remove_forgets_a_topic(tmp_path: Path) -> None:
+    store = DiscoveryStore(tmp_path / "discovery.json")
+    store.mark("homeassistant/switch/x/config", b'{"a":1}')
+    store.remove("homeassistant/switch/x/config")
+    assert store.is_changed("homeassistant/switch/x/config", b'{"a":1}') is True
+
+
+async def test_discovery_store_save_then_load_round_trips_hashes(tmp_path: Path) -> None:
+    path = tmp_path / "discovery.json"
+    store = DiscoveryStore(path)
+    store.mark("homeassistant/switch/x/config", b'{"a":1}')
+    await store.save()
+
+    reloaded = DiscoveryStore(path)
+    reloaded.load()
+    assert reloaded.is_changed("homeassistant/switch/x/config", b'{"a":1}') is False
+
+
+def test_discovery_store_load_rejects_non_object_topics(tmp_path: Path) -> None:
+    path = tmp_path / "discovery.json"
+    path.write_bytes(orjson.dumps({"version": CURRENT_VERSION, "topics": []}))
+    store = DiscoveryStore(path)
+    with pytest.raises(PersistenceError, match="'topics' is not an object"):
+        store.load()
 
 
 async def test_atomic_write_creates_the_file_with_exact_content(tmp_path: Path) -> None:

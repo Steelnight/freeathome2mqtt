@@ -352,6 +352,16 @@ Points that matter:
 | switch sensor / trigger / door ring | `event` | HA's `event` platform — the right fit for edges |
 | unsupported (raw mode) | `sensor` | `entity_category: diagnostic`, disabled by default |
 
+This table covers every profile class, current (tier-1, WP4) and future (tier-2/3, WP11) alike;
+`homeassistant/components.py` (WP10) implements the tier-1 rows above against the 15 profiles
+shipped so far. Two deliberate narrowings versus the table's own wording: `heating_actuator` maps
+to `number`, not `valve` (a bare 0-100% actuating value with no open/close semantics fits `number`
+more directly); and `room_temperature_controller`'s discovery payload omits mode topics entirely —
+"modes derived by a transform" describes `model/transforms.py`'s `RoomTemperatureControllerTransform`,
+which is not yet wired into `bus/` (a pre-existing gap from WP4, out of WP10's scope) — pointing
+Home Assistant at a topic that would never publish or accept a value would be worse than omitting
+mode control until that transform is actually wired.
+
 ### 6.3 Lifecycle
 
 - **Publish** after compile, before state, retained QoS 1.

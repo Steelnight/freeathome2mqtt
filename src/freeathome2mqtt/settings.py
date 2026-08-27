@@ -9,12 +9,14 @@ since some of those (`!secret`'s `data_dir` lookup) cannot be expressed as a pyd
 `settings_to_supervisor_config()` is the one-way translator `supervisor.SupervisorConfig`'s own
 docstring promises: a validated `Settings` becomes a `SupervisorConfig`, never the reverse. Several
 `config.yaml` knobs documented in docs/07 §2 have no effect yet -- `mqtt.version` (MQTT 3.1.1 only,
-see `mqtt/client.py`'s docstring), `homeassistant.*` (WP10), `entities.exclude`/`include` (accepted
-and validated, not yet enforced by `model.compiler`), adaptive coalescing, per-entity command
-overrides, `advanced.metrics`, `advanced.raw_mode`/`cache_config`. Each is a named, deliberate gap,
-not a silent drop -- the schema still accepts and validates them so a `config.yaml` written against
-the full docs/07 reference loads cleanly today and picks up real behaviour as later work packages
-land.
+see `mqtt/client.py`'s docstring), `homeassistant.legacy_entity_attributes` (its exact shape is not
+specified anywhere in docs/04 §6, so it stays accepted-and-validated rather than guessed at),
+`entities.exclude`/`include` (accepted and validated, not yet enforced by `model.compiler`),
+adaptive coalescing, per-entity command overrides, `advanced.metrics`, `advanced.raw_mode`/
+`cache_config`. Each is a named, deliberate gap, not a silent drop -- the schema still accepts and
+validates them so a `config.yaml` written against the full docs/07 reference loads cleanly today
+and picks up real behaviour as later work packages land. `homeassistant.enabled`/`discovery_topic`/
+`status_topic`/`republish_delay` and `mqtt.maximum_packet_size` are wired as of WP10.
 """
 
 from __future__ import annotations
@@ -445,4 +447,9 @@ async def settings_to_supervisor_config(settings: Settings) -> SupervisorConfig:
         link_backoff_cap=settings.sysap.reconnect.max,
         ws_heartbeat_s=settings.sysap.ws_heartbeat,
         ws_idle_timeout_s=settings.sysap.ws_idle_timeout,
+        homeassistant_enabled=settings.homeassistant.enabled,
+        homeassistant_discovery_topic=settings.homeassistant.discovery_topic,
+        homeassistant_status_topic=settings.homeassistant.status_topic,
+        homeassistant_republish_delay_s=settings.homeassistant.republish_delay,
+        mqtt_maximum_packet_size=settings.mqtt.maximum_packet_size,
     )

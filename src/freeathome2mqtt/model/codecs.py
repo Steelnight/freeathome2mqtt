@@ -57,7 +57,20 @@ def _decode_bool01(raw: str) -> bool | None:
     return None
 
 
+_BOOL01_FALSY_STRINGS = frozenset({"off", "false", "0", "no"})
+_BOOL01_TRUTHY_STRINGS = frozenset({"on", "true", "1", "yes"})
+
+
 def _encode_bool01(value: Any) -> str:
+    # docs/11 WP10: Home Assistant's MQTT JSON light schema sends `{"state": "OFF"}` -- a
+    # non-empty string, which plain Python truthiness reads as `True`. Recognise the common
+    # string spellings explicitly before falling back to truthiness for real bools/ints.
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in _BOOL01_FALSY_STRINGS:
+            return "0"
+        if lowered in _BOOL01_TRUTHY_STRINGS:
+            return "1"
     return "1" if value else "0"
 
 

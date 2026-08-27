@@ -10,6 +10,8 @@
     - FID_AWNING_ACTUATOR
   requires:
     outputs: [AL_CURRENT_ABSOLUTE_POSITION_BLINDS_PERCENTAGE]
+  homeassistant:
+    component: cover
 
   attributes:
     # docs/01 §6.1, P-07: free@home 0 = open, 100 = closed -- the bridge's own convention is the
@@ -47,6 +49,8 @@
   # docs/03 §7: position and slat angle interact, and opening fully leaves the slat angle
   # meaningless -- see model/transforms.py's CoverWithSlatsTransform.
   transform: cover_with_slats
+  homeassistant:
+    component: cover
 
   attributes:
     position:

@@ -5,16 +5,21 @@ the user-owned, read-only ``config.yaml`` (docs/07 §1). `EntitiesStore` is writ
 bridge API's mutation path (`mqtt/bridge_api.py`, WP9); this module only has to be correct about
 *how* that state round-trips to disk, not *when* it changes.
 
-Only ``entities.json`` is implemented here. `discovery.json` (docs/07 §4.2, last-published-payload
-hashes) and the configuration snapshot cache (docs/05 §5) are deferred to the work packages that
-actually need them -- WP10's discovery change-detection and WP9's startup-optimisation cache --
-rather than built speculatively ahead of a caller.
+``discovery.json`` (docs/07 §4.2) is implemented here too, as `DiscoveryStore`: a topic -> payload
+hash map that lets a restart with an unchanged installation publish zero discovery messages
+(docs/05 §5), and lets the bridge retract discovery topics it published in a previous run but no
+longer would (P-35's cross-restart case -- the in-memory old-model-vs-new-model diff in
+`supervisor._diff_and_apply` only catches removals that happen *while this process is running*).
+
+The configuration snapshot cache (docs/05 §5) is still deferred to whichever later work package
+actually needs it, rather than built speculatively ahead of a caller.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import os
 import tempfile
 from dataclasses import dataclass, field
@@ -123,6 +128,47 @@ class EntitiesStore:
     def remove(self, entity_id: str) -> None:
         """Explicit prune only (docs/07 §4.1) -- never called automatically on a topology diff."""
         self.entities.pop(entity_id, None)
+
+
+def _hash_payload(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+class DiscoveryStore:
+    """Loads/saves ``discovery.json`` (docs/07 §4.2): the only record of what Home Assistant
+    discovery topics this bridge has published, across restarts.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self.hashes: dict[str, str] = {}
+
+    def load(self) -> None:
+        """Populate `hashes` from disk. A missing file is a fresh install, not an error."""
+        if not self._path.exists():
+            return
+        try:
+            raw = orjson.loads(self._path.read_bytes())
+        except orjson.JSONDecodeError as exc:
+            raise PersistenceError(f"{self._path} is not valid JSON: {exc}") from exc
+        raw = _migrate(raw)
+        topics = raw.get("topics", {})
+        if not isinstance(topics, dict):
+            raise PersistenceError(f"{self._path}: 'topics' is not an object")
+        self.hashes = dict(topics)
+
+    async def save(self) -> None:
+        payload = {"version": CURRENT_VERSION, "topics": self.hashes}
+        await atomic_write(self._path, orjson.dumps(payload))
+
+    def is_changed(self, topic: str, payload: bytes) -> bool:
+        return self.hashes.get(topic) != _hash_payload(payload)
+
+    def mark(self, topic: str, payload: bytes) -> None:
+        self.hashes[topic] = _hash_payload(payload)
+
+    def remove(self, topic: str) -> None:
+        self.hashes.pop(topic, None)
 
 
 async def atomic_write(path: Path, data: bytes) -> None:

@@ -1,5 +1,5 @@
 """Task ownership, startup order, resync/reload, and shutdown (ADR-001; docs/02 §3, §7-8; docs/06
-§3-4; docs/11 WP8).
+§3-4; docs/11 WP8-WP10).
 
 `Supervisor` owns every long-lived task (docs/02 §3) inside one `asyncio.TaskGroup`, each wrapped
 in `restart_on_failure` (docs/02 §3.1): catch, log, back off with jitter, restart -- escalating to
@@ -7,17 +7,19 @@ a fatal `TaskDiedTooManyTimesError` after five rapid failures in a row (P-29), w
 `run()` is expected to treat as "exit the process, let the container restart it."
 
 Startup follows docs/02 §7 precisely: probe, connect MQTT (LWT armed before anything risky can
-fail, P-30), open the SysAP WebSocket and buffer *before* fetching the configuration (P-22), fetch
-and compile, drain the buffer over the compiled state, publish discovery then state then
-`bridge/state: online`. Resync (docs/06 §4) reuses the same buffer-then-fetch-then-drain shape on
-every WebSocket reconnect, topology change (P-13), or `bridge/request/reload`, publishing only the
-entities that actually changed (P-23) -- never re-publishing everything on every blip.
+fail, P-30), open the SysAP WebSocket and buffer *before* fetching the configuration (P-22), fetch,
+compile and build Home Assistant discovery (`homeassistant/discovery.py`, WP10), drain the buffer
+over the compiled state, retract any cross-restart-stale discovery topics (P-35), publish discovery
+then state then `bridge/devices` then `bridge/state: online`. Resync (docs/06 §4) reuses the same
+buffer-then-fetch-then-drain shape on every WebSocket reconnect, topology change (P-13), or
+`bridge/request/reload`, publishing only the entities that actually changed (P-23) -- never
+re-publishing everything on every blip; discovery uses the same changed-only path, backed by
+`persistence.DiscoveryStore` (docs/07 §4.2).
 
-Not yet wired here, by design: `homeassistant/discovery.py` (WP10, so `model.discovery` is always
-empty and `_publish_discovery` is a documented no-op), `mqtt/bridge_api.py`'s `bridge/devices` /
-`bridge/info` / `reload` / rename commands (WP9), and a 404-on-write-triggers-resync hook (docs/06
-§4.1's last row -- a real gap, deferred rather than bolted on without an acceptance test to pin its
-shape down).
+Not yet wired here, by design: a 404-on-write-triggers-resync hook (docs/06 §4.1's last row -- a
+real gap, deferred rather than bolted on without an acceptance test to pin its shape down), and
+per-entity `homeassistant`/`optimistic`/`debounce_ms` overrides from `entity/options` (accepted and
+persisted, not yet consulted -- see `_handle_entity_options`'s own docstring).
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ import logging
 import random
 import ssl as ssl_module
 import time
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -48,15 +50,18 @@ from freeathome2mqtt.bus.ingress import Ingress
 from freeathome2mqtt.bus.publisher import Publisher
 from freeathome2mqtt.bus.reconcile import RateLimiter, Reconciler
 from freeathome2mqtt.bus.state import StateStore
+from freeathome2mqtt.homeassistant.components import DiscoveryOptions
+from freeathome2mqtt.homeassistant.discovery import DiscoveryPublisher, build_model_discovery
 from freeathome2mqtt.metrics import Metrics
 from freeathome2mqtt.model.compiler import CompileOptions, Model
 from freeathome2mqtt.model.compiler import compile as compile_model
-from freeathome2mqtt.model.entity import Entity
-from freeathome2mqtt.model.profiles import ProfileRegistry
+from freeathome2mqtt.model.entity import AttrKind, Entity
+from freeathome2mqtt.model.profiles import Profile, ProfileRegistry
 from freeathome2mqtt.mqtt import topics
 from freeathome2mqtt.mqtt.bridge_api import BridgeApi, BridgeApiError, Handler
 from freeathome2mqtt.mqtt.client import MqttClient, MqttClientNotConnectedError
-from freeathome2mqtt.persistence import EntitiesStore
+from freeathome2mqtt.persistence import DiscoveryStore, EntitiesStore
+from freeathome2mqtt.sysap.codes import Function
 from freeathome2mqtt.sysap.rest import (
     AuthenticationError,
     BadRequestError,
@@ -65,7 +70,13 @@ from freeathome2mqtt.sysap.rest import (
     RestClient,
     SysApError,
 )
-from freeathome2mqtt.sysap.schema import Configuration, WsFrameBody
+from freeathome2mqtt.sysap.schema import (
+    Channel,
+    Configuration,
+    Device,
+    WsFrameBody,
+    parse_function_id,
+)
 from freeathome2mqtt.sysap.settings_probe import (
     SysApSettings,
     check_version_supported,
@@ -125,6 +136,199 @@ def _package_version() -> str:
 
 def _connected_or_not(connected: bool) -> str:
     return "connected" if connected else "disconnected"
+
+
+# -------------------------------------------------------------------- bridge/devices (docs/04 §4.3)
+#
+# Pure, module-level functions (no `self`) -- independently testable, and a natural pairing with
+# `_hash_config` above. `_bd_unsupported_reason` is a deliberate simplification: it distinguishes
+# "orphaned" (no floor/room), "unknown function ID", and a single generic "no profile claims this
+# function" bucket, rather than reconstructing `model/compiler.py`'s private specificity/tie-break
+# logic to report exactly *which* profiles almost matched -- the same kind of documented
+# simplification `_handle_device_refresh`'s docstring already accepts for a different corner.
+
+
+def _bd_resolve_floorplan(config: Configuration) -> dict[str, dict[str, str]]:
+    floors = config.get("floorplan", {}).get("floors", {})
+    result: dict[str, dict[str, str]] = {}
+    for floor_id, floor in floors.items():
+        rooms = floor.get("rooms") or {}  # P-14: rooms may be null, not just absent
+        result[floor_id] = {room_id: room.get("name", "") for room_id, room in rooms.items()}
+    return result
+
+
+def _bd_area(floorplan: Mapping[str, Mapping[str, str]], floor_id: str, room_id: str) -> str | None:
+    return floorplan.get(floor_id, {}).get(room_id)
+
+
+def _bd_device_area(floorplan: Mapping[str, Mapping[str, str]], device: Device) -> str | None:
+    floor_id, room_id = device.get("floor"), device.get("room")
+    if floor_id is None or room_id is None:
+        return None
+    return _bd_area(floorplan, floor_id, room_id)
+
+
+def _bd_function_fields(channel: Channel) -> tuple[str | None, str | None]:
+    raw = channel.get("functionID")
+    function_id = parse_function_id(raw)
+    if function_id is None:
+        return raw, None
+    try:
+        return f"0x{function_id:X}", Function(function_id).name
+    except ValueError:
+        return f"0x{function_id:X}", None
+
+
+def _bd_unsupported_reason(channel: Channel, device: Device) -> str:
+    floor_id = channel.get("floor") or device.get("floor")
+    room_id = channel.get("room") or device.get("room")
+    if floor_id is None or room_id is None:
+        return "no floor/room assigned (orphaned channel)"
+    function_id = parse_function_id(channel.get("functionID"))
+    if function_id is None:
+        return "unrecognised functionID"
+    try:
+        Function(function_id)
+    except ValueError:
+        return "unknown function ID"
+    return "no profile claims this function"
+
+
+def _bd_attribute_entries(entity: Entity, profile: Profile) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for name, kind in zip(entity.attr_names, entity.attr_kinds, strict=True):
+        spec = profile.attributes[name]
+        entry: dict[str, Any] = {
+            "name": name,
+            "codec": spec.codec,
+            "kind": "event" if kind == AttrKind.EVENT else "state",
+        }
+        if spec.unit:
+            entry["unit"] = spec.unit
+        entries.append(entry)
+    return entries
+
+
+def _bd_command_entries(profile: Profile, command_names: Sequence[str]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for name in command_names:
+        spec = profile.commands[name]
+        entry: dict[str, Any] = {"name": name, "continuous": spec.continuous}
+        if spec.range is not None:
+            entry["range"] = list(spec.range)
+        entries.append(entry)
+    return entries
+
+
+def _bd_supported_channel_entry(
+    channel_id: str,
+    channel: Channel,
+    entity: Entity,
+    profile: Profile,
+    command_names: Sequence[str],
+) -> dict[str, Any]:
+    function_id, function_name = _bd_function_fields(channel)
+    return {
+        "channel_id": channel_id,
+        "entity_id": entity.id,
+        "topic": entity.state_topic,
+        "name": entity.name,
+        "area": entity.area,
+        "function_id": function_id,
+        "function": function_name,
+        "profile": entity.profile,
+        "supported": True,
+        "attributes": _bd_attribute_entries(entity, profile),
+        "commands": _bd_command_entries(profile, command_names),
+    }
+
+
+def _bd_unsupported_channel_entry(
+    channel_id: str, channel: Channel, device: Device
+) -> dict[str, Any]:
+    function_id, function_name = _bd_function_fields(channel)
+    return {
+        "channel_id": channel_id,
+        "function_id": function_id,
+        "function": function_name,
+        "supported": False,
+        "reason": _bd_unsupported_reason(channel, device),
+    }
+
+
+def _bd_device_channels(
+    serial: str,
+    device: Device,
+    model: Model,
+    profiles: ProfileRegistry,
+    commands_by_entity: Mapping[int, set[str]],
+) -> list[dict[str, Any]]:
+    channels_out: list[dict[str, Any]] = []
+    for channel_id in sorted(device.get("channels", {})):
+        channel = device["channels"][channel_id]
+        entity_idx = model.by_id.get(f"{serial}_{channel_id}")
+        if entity_idx is None:
+            channels_out.append(_bd_unsupported_channel_entry(channel_id, channel, device))
+            continue
+        entity = model.entities[entity_idx]
+        profile = profiles[entity.profile]
+        command_names = [
+            name for name in profile.commands if name in commands_by_entity.get(entity_idx, ())
+        ]
+        channels_out.append(
+            _bd_supported_channel_entry(channel_id, channel, entity, profile, command_names)
+        )
+    return channels_out
+
+
+def _build_bridge_devices(
+    config: Configuration, model: Model, profiles: ProfileRegistry
+) -> list[dict[str, Any]]:
+    """docs/04 §4.3: every device, its channels, which profile matched, and which did not."""
+    devices_raw = config.get("devices", {})
+    floorplan = _bd_resolve_floorplan(config)
+    commands_by_entity: dict[int, set[str]] = {}
+    for entity_idx, command_name in model.egress:
+        commands_by_entity.setdefault(entity_idx, set()).add(command_name)
+
+    result: list[dict[str, Any]] = []
+    for serial in sorted(devices_raw):
+        device = devices_raw[serial]
+        result.append(
+            {
+                "serial": serial,
+                "name": device.get("displayName", serial),
+                "device_id": device.get("deviceId"),
+                "article_number": device.get("articleNumber"),
+                "interface": device.get("interface"),
+                "area": _bd_device_area(floorplan, device),
+                "unresponsive": device.get("unresponsive", False),
+                "defect": device.get("defect", False),
+                "channels": _bd_device_channels(
+                    serial, device, model, profiles, commands_by_entity
+                ),
+            }
+        )
+    return result
+
+
+def _split_devices_payload(devices: Sequence[dict[str, Any]], max_size: int) -> list[bytes]:
+    """P-41: split into parts that each fit `max_size`, greedily. A single device whose own
+    entry already exceeds `max_size` still gets its own, oversized part -- there is no smaller
+    unit to split it into, so this is the best effort possible rather than a silent failure.
+    """
+    parts: list[bytes] = []
+    current: list[dict[str, Any]] = []
+    for device in devices:
+        candidate = [*current, device]
+        payload = orjson.dumps(candidate)
+        if len(payload) > max_size and current:
+            parts.append(orjson.dumps(current))
+            current = [device]
+        else:
+            current = candidate
+    parts.append(orjson.dumps(current))
+    return parts
 
 
 async def _wait_until(predicate: Callable[[], bool]) -> None:
@@ -259,6 +463,11 @@ class SupervisorConfig:
     link_backoff_cap: float = 60.0
     ws_heartbeat_s: float | None = 30.0
     ws_idle_timeout_s: float = 90.0
+    homeassistant_enabled: bool = True
+    homeassistant_discovery_topic: str = "homeassistant"
+    homeassistant_status_topic: str = "homeassistant/status"
+    homeassistant_republish_delay_s: float = 5.0
+    mqtt_maximum_packet_size: int = 1048576
 
 
 class Supervisor:
@@ -277,6 +486,7 @@ class Supervisor:
 
         self.metrics = Metrics()
         self._entities_store = EntitiesStore(config.data_dir / "entities.json")
+        self._discovery_store = DiscoveryStore(config.data_dir / "discovery.json")
 
         self._model: Model | None = None
         self._state: StateStore | None = None
@@ -287,6 +497,7 @@ class Supervisor:
         self._reconciler: Reconciler | None = None
         self._commands: CommandDispatcher | None = None
         self._device_availability: DeviceAvailabilityPublisher | None = None
+        self._discovery_publisher: DiscoveryPublisher | None = None
 
         self._mqtt: MqttClient | None = None
         self._rest: RestClient | None = None
@@ -348,7 +559,7 @@ class Supervisor:
         self._rest = rest
 
         config = await self._fetch_configuration_with_retry()
-        model = compile_model(config, self._profiles, self._effective_compile_options())
+        model = self._compile_and_build_discovery(config)
         self._model = model
         return model
 
@@ -377,6 +588,7 @@ class Supervisor:
     async def _startup(self) -> None:
         self._started_at = time.monotonic()
         self._entities_store.load()
+        self._discovery_store.load()
 
         settings = await fetch_settings(self._http_session, self._config.sysap_base_url)
         check_version_supported(settings.version)
@@ -391,6 +603,11 @@ class Supervisor:
             password=self._config.mqtt_password,
             tls_context=self._config.mqtt_tls,
             keepalive=self._config.mqtt_keepalive,
+            homeassistant_discovery_topic=(
+                self._config.homeassistant_discovery_topic
+                if self._config.homeassistant_enabled
+                else None
+            ),
             backoff_initial=self._config.link_backoff_initial,
             backoff_factor=self._config.link_backoff_factor,
             backoff_cap=self._config.link_backoff_cap,
@@ -410,6 +627,7 @@ class Supervisor:
         )
         self._availability = availability
         self._device_availability = DeviceAvailabilityPublisher(mqtt=mqtt)
+        self._discovery_publisher = DiscoveryPublisher(mqtt=mqtt, store=self._discovery_store)
 
         self._spawn_supervised("mqtt_client", mqtt.run)
         await _wait_until(lambda: mqtt.reconnect_count >= 1)
@@ -445,7 +663,7 @@ class Supervisor:
         availability.set_sysap_connected(True)
 
         config = await self._fetch_configuration_with_retry()
-        new_model = compile_model(config, self._profiles, self._effective_compile_options())
+        new_model = self._compile_and_build_discovery(config)
         self._last_config_hash = _hash_config(config)
         state = self._seed_state(new_model)
         self._rebuild_dependents(model=new_model, state=state, mqtt=mqtt, rest=rest)
@@ -453,10 +671,16 @@ class Supervisor:
         for body in ws.drain_buffer():
             self._ingress_or_raise().process_frame(body)
 
+        # A restart may find topics `discovery.json` remembers publishing in a *previous* run
+        # that this run's model no longer has (P-35's cross-restart case) -- only meaningful on
+        # this very first compile, since the in-memory diff `_diff_and_apply` does on every later
+        # resync already catches everything removed while this process is running.
+        await self._retract_stale_discovery(new_model)
         await self._publish_discovery(new_model)
         state.dirty.update(range(len(new_model.entities)))
         await self._publisher_or_raise().flush()
         await self._device_availability.publish(new_model.entities, config.get("devices", {}))
+        await self._publish_bridge_devices(config, new_model)
 
         availability.set_model_loaded(True)
         await availability.publish_now()
@@ -502,6 +726,20 @@ class Supervisor:
             excluded_entity_ids=excluded_entity_ids,
         )
 
+    def _discovery_options(self) -> DiscoveryOptions:
+        settings = self._sysap_settings
+        return DiscoveryOptions(
+            enabled=self._config.homeassistant_enabled,
+            discovery_topic=self._config.homeassistant_discovery_topic,
+            base_topic=self._config.base_topic,
+            sysap_serial=settings.serial_number if settings is not None else "",
+            bridge_version=_package_version(),
+        )
+
+    def _compile_and_build_discovery(self, config: Configuration) -> Model:
+        model = compile_model(config, self._profiles, self._effective_compile_options())
+        return build_model_discovery(model, self._profiles, config, self._discovery_options())
+
     async def _fetch_configuration_with_retry(self) -> Configuration:
         """docs/06 §7: the SysAP may simply be booting alongside us -- retry indefinitely rather
         than giving up, except for auth failures, which are never retried (P-20).
@@ -529,12 +767,43 @@ class Supervisor:
                 )
 
     async def _publish_discovery(self, model: Model) -> None:
-        """WP10 will populate `model.discovery`; until then this is a documented no-op."""
+        """Changed-only publish (docs/05 §5): a no-op reload publishes zero discovery messages."""
+        publisher = self._discovery_publisher
+        if publisher is None:
+            raise RuntimeError("_publish_discovery called before MqttClient exists")
+        await publisher.publish_changed(model)
+
+    async def _retract_stale_discovery(self, model: Model) -> None:
+        publisher = self._discovery_publisher
+        if publisher is None:
+            return
+        stale = publisher.stale_topics(model)
+        if stale:
+            await publisher.retract(stale)
+
+    async def _publish_bridge_devices(self, config: Configuration, model: Model) -> None:
+        """docs/04 §4.3: the retained device/channel inventory, split into indexed parts if it
+        would exceed `mqtt.maximum_packet_size` (P-41) -- published sequentially, one publish
+        per part, never gathered (P-49 applies here just as much as to the initial entity flood).
+        """
         mqtt = self._mqtt
         if mqtt is None:
-            raise RuntimeError("_publish_discovery called before MqttClient exists")
-        for topic, payload in model.discovery:
-            await mqtt.publish(topic, payload, qos=1, retain=True)
+            raise RuntimeError("_publish_bridge_devices called before MqttClient exists")
+        devices = _build_bridge_devices(config, model, self._profiles)
+        parts = _split_devices_payload(devices, self._config.mqtt_maximum_packet_size)
+        base = self._config.base_topic
+        if len(parts) == 1:
+            await mqtt.publish(topics.bridge_devices_topic(base), parts[0], qos=1, retain=True)
+            return
+        part_topics = [topics.bridge_devices_part_topic(base, n) for n in range(len(parts))]
+        for part_topic, payload in zip(part_topics, parts, strict=True):
+            await mqtt.publish(part_topic, payload, qos=1, retain=True)
+        await mqtt.publish(
+            topics.bridge_devices_topic(base),
+            orjson.dumps({"parts": part_topics}),
+            qos=1,
+            retain=True,
+        )
 
     def _rebuild_dependents(
         self, *, model: Model, state: StateStore, mqtt: MqttClient, rest: RestClient
@@ -593,6 +862,30 @@ class Supervisor:
             self._commands.on_message(message)
         if self._bridge_api is not None:
             self._bridge_api.on_message(message)
+        if self._is_ha_birth_message(message):
+            self._spawn_background(self._handle_ha_birth(), name="ha_birth_republish")
+
+    def _is_ha_birth_message(self, message: aiomqtt.Message) -> bool:
+        """P-36: Home Assistant announces itself as `homeassistant/status: "online"` after a
+        (re)start or a purge -- that is the bridge's only signal to republish discovery so HA
+        recovers its entities.
+        """
+        if not self._config.homeassistant_enabled:
+            return False
+        return (
+            str(message.topic) == self._config.homeassistant_status_topic
+            and message.payload == b"online"
+        )
+
+    async def _handle_ha_birth(self) -> None:
+        """P-37: wait `republish_delay_s` before republishing -- an instant republish can race
+        Home Assistant's own MQTT integration still coming up after the birth message.
+        """
+        await asyncio.sleep(self._config.homeassistant_republish_delay_s)
+        model = self._model
+        publisher = self._discovery_publisher
+        if model is not None and publisher is not None:
+            await publisher.publish_all(model)
 
     async def _on_mqtt_reconnected(self) -> None:
         """docs/08 §9: republish the accumulated dirty batch and flip `bridge/state` back online
@@ -635,9 +928,10 @@ class Supervisor:
         ws.start_buffering()
         if config is None:
             config = await self._fetch_configuration_with_retry()
-        new_model = compile_model(config, self._profiles, self._effective_compile_options())
+        new_model = self._compile_and_build_discovery(config)
         self._last_config_hash = _hash_config(config)
         await self._diff_and_apply(new_model, mqtt=mqtt, rest=rest)
+        await self._publish_discovery(new_model)
 
         ingress = self._ingress_or_raise()
         for body in ws.drain_buffer():
@@ -651,6 +945,7 @@ class Supervisor:
             raise RuntimeError("_resync called before availability trackers exist")
         await availability.publish_now()
         await device_availability.publish(new_model.entities, config.get("devices", {}))
+        await self._publish_bridge_devices(config, new_model)
 
         self.metrics.config_reloads += 1
 
@@ -683,8 +978,9 @@ class Supervisor:
         await mqtt.publish(entity.state_topic, b"", qos=0, retain=True)
         if entity.availability_topic is not None:
             await mqtt.publish(entity.availability_topic, b"", qos=1, retain=True)
-        for discovery_topic, _ in entity.discovery:
-            await mqtt.publish(discovery_topic, b"", qos=1, retain=True)
+        publisher = self._discovery_publisher
+        if publisher is not None:
+            await publisher.retract(topic for topic, _ in entity.discovery)
 
     async def _config_refresh_loop(self) -> None:
         """docs/06 §4.1: fetch + hash on a timer; resync only if the hash actually changed."""
@@ -735,13 +1031,15 @@ class Supervisor:
         return {}
 
     async def _handle_entity_rename(self, args: dict[str, Any]) -> dict[str, Any]:
-        """docs/04 §5 `entity/rename`: the ADR-010 transaction -- clear every old retained topic,
-        persist the alias, recompile so the new topic takes effect, force a republish under it
-        (a rename usually doesn't change the *value*, so the ordinary diff-by-value resync would
-        never republish it on its own), then emit `bridge/event`. Discovery republishing under
-        the new topic is deferred to WP10 alongside HA discovery generation itself -- `_resync()`
-        already never republishes discovery on any trigger, since `model.discovery` is always
-        empty until then.
+        """docs/04 §5 `entity/rename`: the ADR-010 transaction -- clear every old retained topic
+        (state and discovery), persist the alias, recompile so the new topic takes effect, force a
+        republish under it (a rename usually doesn't change the *value*, so the ordinary
+        diff-by-value resync would never republish it on its own), then emit `bridge/event`. The
+        entity's discovery config republishes under its new topic automatically: `_resync()`
+        below now always (re)builds and changed-only-publishes discovery for the current model,
+        and the renamed entity's topic (its `object_id` segment) is new from the store's point of
+        view, so it is never mistaken for "unchanged". `unique_id` staying the entity id (P-34) is
+        what keeps this from creating a duplicate entity in Home Assistant.
         """
         entity_id = args.get("id")
         new_name = args.get("name")
@@ -794,7 +1092,9 @@ class Supervisor:
         resync so the change actually takes effect. `optimistic`/`debounce_ms`/`homeassistant`
         round-trip through the store correctly but are not yet consulted anywhere at runtime; that
         is a real, named gap (per-entity command/discovery overrides), not silently dropped --
-        `CommandDispatcher` and HA discovery (WP10) are both still installation-wide.
+        `CommandDispatcher` and HA discovery (`homeassistant/discovery.py`, WP10) both still apply
+        installation-wide settings only; a per-entity `homeassistant` override in `entities.json`
+        is accepted and persisted but has no effect on what `build_model_discovery` produces.
         """
         entity_id = args.get("id")
         options = args.get("options")
@@ -846,14 +1146,15 @@ class Supervisor:
         return {"serial": serial}
 
     async def _handle_discovery_republish(self, _args: dict[str, Any]) -> dict[str, Any]:
-        """docs/04 §5 `discovery/republish`: force a full HA discovery republish. A no-op in
-        practice until WP10 populates `model.discovery` -- see `_publish_discovery`'s own
-        docstring -- but the command itself is wired now so nothing needs revisiting later.
+        """docs/04 §5 `discovery/republish`: force a full HA discovery republish -- every topic,
+        regardless of `discovery.json`'s changed-only bookkeeping (`_publish_discovery` is the
+        changed-only path ordinary resyncs use; this one always publishes everything).
         """
         model = self._model
-        if model is None:
+        publisher = self._discovery_publisher
+        if model is None or publisher is None:
             raise BridgeApiError("bridge is not ready yet")
-        await self._publish_discovery(model)
+        await publisher.publish_all(model)
         return {}
 
     async def _handle_log_level(self, args: dict[str, Any]) -> dict[str, Any]:

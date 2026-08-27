@@ -17,6 +17,8 @@
         AL_INFO_HEATING_COOLING_MODE,
       ]
   transform: room_temperature_controller
+  homeassistant:
+    component: climate
 
   attributes:
     # Positional inputs to model/transforms.py's RoomTemperatureControllerTransform: index 0, 1,
@@ -77,6 +79,8 @@
     - FID_ROOM_TEMPERATURE_CONTROLLER_MASTER_WITHOUT_FAN
   requires:
     outputs: [AL_MEASURED_TEMPERATURE]
+  homeassistant:
+    component: climate
 
   attributes:
     measured_temperature:
@@ -103,6 +107,10 @@
     - FID_HEATING_ACTUATOR
   requires:
     outputs: [AL_ACTUATING_VALUE_HEATING]
+  # docs/04 §6.2: "valve or number" -- number fits a bare 0-100% actuating value with no
+  # open/close semantics more directly than HA's valve platform.
+  homeassistant:
+    component: number
 
   attributes:
     heating_value:

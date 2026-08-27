@@ -7,6 +7,11 @@
     - FID_WINDOW_DOOR_SENSOR
     - FID_WINDOW_DOOR_SENSOR_TYPE0
     - FID_WINDOW_DOOR_SENSOR_TYPE1
+  # The profile can't distinguish an actual window from an actual door (docs/04 §6.2 lists both
+  # as options); window is the more common installation and the documented default.
+  homeassistant:
+    component: binary_sensor
+    device_class: window
 
   attributes:
     state:
@@ -19,6 +24,9 @@
   description: A motion/presence detector, optionally blockable (docs/03 §9).
   functions:
     - FID_MOVEMENT_DETECTOR
+  homeassistant:
+    component: binary_sensor
+    device_class: motion
 
   attributes:
     # A PIR/motion sensor's detected state is retained until it clears, not a momentary press
@@ -32,6 +40,9 @@
   description: An ambient light level sensor.
   functions:
     - FID_BRIGHTNESS_SENSOR
+  homeassistant:
+    component: sensor
+    device_class: illuminance
 
   attributes:
     # AL_BRIGHTNESS_LEVEL is a raw lux reading, not a 0..100 percentage -- percent_int would
@@ -47,6 +58,9 @@
   functions:
     - FID_TEMPERATURE_SENSOR
     - FID_TEMPERATURE_SENSOR_TYPE1
+  homeassistant:
+    component: sensor
+    device_class: temperature
 
   attributes:
     temperature:
@@ -60,6 +74,8 @@
   description: A rocker/toggle switch sensor (docs/01 §6.6) -- events, never retained state.
   functions:
     - FID_SWITCH_SENSOR
+  homeassistant:
+    component: event
 
   attributes:
     state:
@@ -73,6 +89,9 @@
   functions:
     - FID_PUSH_BUTTON_SENSOR
     - FID_TRIGGER
+  homeassistant:
+    component: event
+    device_class: button
 
   attributes:
     pressed:
@@ -85,6 +104,9 @@
   functions:
     - FID_SMOKE_DETECTOR
     - FID_SMOKE_DETECTOR_TYPE1
+  homeassistant:
+    component: binary_sensor
+    device_class: smoke
 
   attributes:
     alarm:

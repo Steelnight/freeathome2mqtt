@@ -7,6 +7,7 @@ import pytest
 from freeathome2mqtt.mqtt.topics import (
     WildcardTopicError,
     assert_publishable,
+    bridge_devices_part_topic,
     bridge_devices_topic,
     bridge_event_topic,
     bridge_logging_topic,
@@ -21,6 +22,7 @@ from freeathome2mqtt.mqtt.topics import (
     entity_set_topic,
     entity_state_topic,
     ha_birth_topic,
+    ha_discovery_config_topic,
 )
 
 BASE = "freeathome2mqtt"
@@ -73,6 +75,17 @@ def test_command_subscriptions_are_exactly_the_adr006_set() -> None:
 
 def test_ha_birth_topic() -> None:
     assert ha_birth_topic("homeassistant") == "homeassistant/status"
+
+
+def test_bridge_devices_part_topic() -> None:
+    assert bridge_devices_part_topic(BASE, 2) == "freeathome2mqtt/bridge/devices/2"
+
+
+def test_ha_discovery_config_topic() -> None:
+    assert (
+        ha_discovery_config_topic("homeassistant", "light", "ABB7F500E17A_ch0003", "kueche_licht")
+        == "homeassistant/light/ABB7F500E17A_ch0003/kueche_licht/config"
+    )
 
 
 def test_assert_publishable_accepts_a_normal_topic() -> None:

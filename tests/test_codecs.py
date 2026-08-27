@@ -94,6 +94,18 @@ def test_bool01_encode() -> None:
     assert codec.encode(False) == "0"
 
 
+@pytest.mark.parametrize("raw", ["OFF", "off", "false", "False", "0", "no"])
+def test_bool01_encode_recognises_falsy_strings(raw: str) -> None:
+    # docs/11 WP10, regression: Home Assistant's MQTT JSON light schema sends {"state": "OFF"} --
+    # a non-empty string, which plain `"1" if value else "0"` truthiness always read as True.
+    assert build_codec("bool01").encode(raw) == "0"
+
+
+@pytest.mark.parametrize("raw", ["ON", "on", "true", "True", "1", "yes"])
+def test_bool01_encode_recognises_truthy_strings(raw: str) -> None:
+    assert build_codec("bool01").encode(raw) == "1"
+
+
 # ------------------------------------------------------------------------------- int
 
 

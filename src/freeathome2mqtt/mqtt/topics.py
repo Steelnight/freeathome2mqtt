@@ -52,6 +52,14 @@ def bridge_devices_topic(base_topic: str) -> str:
     return f"{base_topic}/bridge/devices"
 
 
+def bridge_devices_part_topic(base_topic: str, part: int) -> str:
+    """docs/04 §4.3, P-41: one indexed part of a `bridge/devices` payload too large for
+    `mqtt.maximum_packet_size` -- `bridge_devices_topic` itself becomes an index message
+    listing these instead of the flat inventory.
+    """
+    return f"{base_topic}/bridge/devices/{part}"
+
+
 def bridge_event_topic(base_topic: str) -> str:
     return f"{base_topic}/bridge/event"
 
@@ -80,6 +88,15 @@ def command_subscriptions(base_topic: str) -> tuple[str, ...]:
 
 def ha_birth_topic(discovery_topic: str) -> str:
     return f"{discovery_topic}/status"
+
+
+def ha_discovery_config_topic(
+    discovery_topic: str, component: str, node_id: str, object_id: str
+) -> str:
+    """docs/04 §6.1: `<node_id>` is the entity id (stable across renames), `<object_id>` seeds
+    Home Assistant's initial `entity_id`.
+    """
+    return f"{discovery_topic}/{component}/{node_id}/{object_id}/config"
 
 
 def assert_publishable(topic: str) -> None:

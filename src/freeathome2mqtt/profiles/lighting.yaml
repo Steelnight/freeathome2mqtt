@@ -5,6 +5,8 @@
   description: A simple on/off actuator.
   functions:
     - FID_SWITCH_ACTUATOR
+  homeassistant:
+    component: switch
 
   attributes:
     state:
@@ -24,6 +26,8 @@
     - FID_DIMMING_ACTUATOR
   requires:
     outputs: [AL_INFO_ON_OFF, AL_INFO_ACTUAL_DIMMING_VALUE]
+  homeassistant:
+    component: light
 
   attributes:
     state:
@@ -77,6 +81,8 @@
     - FID_DIMMING_ACTUATOR
   requires:
     outputs: [AL_INFO_ON_OFF, AL_INFO_ACTUAL_DIMMING_VALUE, AL_INFO_COLOR_TEMPERATURE]
+  homeassistant:
+    component: light
 
   attributes:
     state:

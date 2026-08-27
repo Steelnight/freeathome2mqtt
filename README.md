@@ -3,13 +3,13 @@
 A high-performance bridge between an **ABB / Busch-Jaeger free@home** System Access Point (SysAP)
 and **MQTT**.
 
-> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP9](docs/11-implementation-plan.md#wp9--bridge-api-and-configuration)
+> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP10](docs/11-implementation-plan.md#wp10--home-assistant-discovery)
 > landed.** Bootstrap tooling, the generated pairing/function/parameter/interface code tables, the
 > SysAP settings pre-flight, the capture tool's pseudonymisation, the `minimal`/`typical`/`nasty`
 > configuration fixtures, a real SysAP client (`RestClient`, `WsReader` against a from-scratch fake
 > SysAP), the domain model (codecs, slugify + deterministic collision resolution, the
 > `Entity`/`Binding`/`EgressBinding` runtime shapes, a JSON-Schema-validated profile loader, and the
-> pure `compile()`), a real tier-1 profile set — 13 profiles covering switches, dimmers,
+> pure `compile()`), a real tier-1 profile set — 15 profiles covering switches, dimmers,
 > colour-temperature lighting, covers (plain and slatted), climate, and the common sensor types,
 > each with a round-trip fixture, plus the `room_temperature_controller`/`cover_with_slats`
 > transforms — real MQTT connectivity: `MqttClient` (LWT, narrow ADR-006 subscriptions,
@@ -43,10 +43,22 @@ and **MQTT**.
 > models, `FAH2MQTT_*` environment overrides, `!env`/`!secret`/`!file` YAML tags, and every docs/07
 > §2.2 semantic check), `sysap/mdns.py` (zeroconf discovery of the SysAP, tested against a real
 > loopback multicast round trip), and `cli.py` (`--check-config`, `--discover`, `--capture`, and a
-> `--dry-run` that connects, fetches, and compiles without ever touching MQTT). The documents under
-> [`docs/`](docs/) are written to be executed by an implementing agent (human or AI) top to bottom,
-> and [WP10](docs/11-implementation-plan.md#wp10--home-assistant-discovery) (Home Assistant
-> discovery) is next.
+> `--dry-run` that connects, fetches, and compiles without ever touching MQTT) — and now Home
+> Assistant MQTT discovery itself: `homeassistant/components.py` (pure, per-platform discovery
+> payload builders — `switch`/`light`/`cover`/`binary_sensor`/`sensor`/`number`/`climate`/`event` —
+> dispatched from each profile's own `homeassistant:` YAML block through a closed registry) and
+> `homeassistant/discovery.py` (`build_model_discovery()` runs *after* `compile()` and mutates
+> `Entity.discovery` in place — non-frozen since WP3 for exactly this reason — plus
+> `DiscoveryPublisher`: changed-only publishing backed by a new `discovery.json` store, so a
+> restart with an unchanged installation publishes zero discovery messages, with a delayed
+> republish on the Home Assistant birth message, P-36/P-37); `supervisor.py` now also builds and
+> splits the `bridge/devices` inventory (P-41) and retracts discovery topics left over from a
+> *previous* run (P-35). The new `bench_startup` (a 1000-channel cold start to
+> `bridge/state: online`) meets its P6 budget too, alongside every earlier benchmark. The documents
+> under [`docs/`](docs/) are written to be executed by an implementing agent (human or AI) top to
+> bottom, and
+> [WP11](docs/11-implementation-plan.md#wp11--tier-23-profiles-and-raw-mode) (tier-2/3 profiles and
+> raw mode) is next.
 
 ---
 

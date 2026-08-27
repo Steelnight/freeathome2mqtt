@@ -383,6 +383,36 @@ async def test_translation_mqtt_ca_produces_an_ssl_context(tmp_path: Path) -> No
     assert isinstance(config.mqtt_tls, ssl.SSLContext)
 
 
+async def test_translation_maps_homeassistant_and_mqtt_packet_size_fields(tmp_path: Path) -> None:
+    config_yaml = (
+        MINIMAL_CONFIG + "\nhomeassistant:\n"
+        "  enabled: false\n"
+        "  discovery_topic: hass\n"
+        "  status_topic: hass/status\n"
+        "  republish_delay: 7\n"
+        "\nmqtt:\n  server: mqtt://192.168.1.10:1883\n  maximum_packet_size: 2048\n"
+    )
+    path = _write(tmp_path, config_yaml)
+    settings = load_settings(path, environ={})
+    config = await settings_to_supervisor_config(settings)
+    assert config.homeassistant_enabled is False
+    assert config.homeassistant_discovery_topic == "hass"
+    assert config.homeassistant_status_topic == "hass/status"
+    assert config.homeassistant_republish_delay_s == pytest.approx(7.0)
+    assert config.mqtt_maximum_packet_size == 2048
+
+
+async def test_translation_homeassistant_defaults(tmp_path: Path) -> None:
+    path = _write(tmp_path, MINIMAL_CONFIG)
+    settings = load_settings(path, environ={})
+    config = await settings_to_supervisor_config(settings)
+    assert config.homeassistant_enabled is True
+    assert config.homeassistant_discovery_topic == "homeassistant"
+    assert config.homeassistant_status_topic == "homeassistant/status"
+    assert config.homeassistant_republish_delay_s == pytest.approx(5.0)
+    assert config.mqtt_maximum_packet_size == 1048576
+
+
 async def test_invalid_mqtt_server_url_is_rejected(tmp_path: Path) -> None:
     # The scheme/hostname check only runs in the translator -- Settings itself accepts any
     # string for mqtt.server, since it's `settings_to_supervisor_config` that needs the URL

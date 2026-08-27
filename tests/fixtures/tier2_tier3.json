@@ -1,0 +1,518 @@
+{
+  "00000000-0000-0000-0000-000000000000": {
+    "sysapName": "Tier-2/3 Test Installation",
+    "sysap": {},
+    "users": {},
+    "floorplan": {
+      "floors": {
+        "01": {
+          "name": "Ground Floor",
+          "rooms": {
+            "01": {
+              "name": "Utility Room"
+            }
+          }
+        }
+      }
+    },
+    "devices": {
+      "ABB000000001": {
+        "displayName": "VOC",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "bb",
+            "floor": "01",
+            "room": "01",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1569,
+                "value": "120"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB000000002": {
+        "displayName": "CO",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "7e",
+            "floor": "01",
+            "room": "01",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 708,
+                "value": "0"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB000000003": {
+        "displayName": "RainAlarm",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "e",
+            "floor": "01",
+            "room": "01",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 39,
+                "value": "0"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB000000004": {
+        "displayName": "Rain",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "42",
+            "floor": "01",
+            "room": "01",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1029,
+                "value": "10"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB000000005": {
+        "displayName": "WindAlarm",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "c",
+            "floor": "01",
+            "room": "01",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 37,
+                "value": "0"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB000000006": {
+        "displayName": "Wind",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "44",
+            "floor": "01",
+            "room": "01",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1028,
+                "value": "3.5"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB000000007": {
+        "displayName": "BlindSensor",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "3",
+            "floor": "01",
+            "room": "01",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 32,
+                "value": "1"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB000000008": {
+        "displayName": "DimmingSensor",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "1",
+            "floor": "01",
+            "room": "01",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 16,
+                "value": "5"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB000000009": {
+        "displayName": "StaircaseSensor",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "4",
+            "floor": "01",
+            "room": "01",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1,
+                "value": "1"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB00000000A": {
+        "displayName": "ForceOnOffSensor",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "5",
+            "floor": "01",
+            "room": "01",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 3,
+                "value": "0"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB00000000B": {
+        "displayName": "DoorOpener",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "1a",
+            "floor": "01",
+            "room": "01",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 5,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1545,
+                "value": "0"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB00000000C": {
+        "displayName": "DoorRing",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "1f",
+            "floor": "01",
+            "room": "01",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB00000000D": {
+        "displayName": "WelcomeMute",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "5c",
+            "floor": "01",
+            "room": "01",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1093,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1122,
+                "value": "0"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB00000000E": {
+        "displayName": "Inverter",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "4e",
+            "floor": "01",
+            "room": "01",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1215,
+                "value": "1500.0"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB00000000F": {
+        "displayName": "Battery",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "50",
+            "floor": "01",
+            "room": "01",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1218,
+                "value": "-42.0"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB000000010": {
+        "displayName": "Meter",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "4f",
+            "floor": "01",
+            "room": "01",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1216,
+                "value": "780.2"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB000000011": {
+        "displayName": "MWireSwitch",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "10e8",
+            "floor": "01",
+            "room": "01",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "1"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "6000AB01": {
+        "displayName": "VirtualSwitch",
+        "interface": "VD",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "7",
+            "floor": "01",
+            "room": "01",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "1"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "6000AB02": {
+        "displayName": "VirtualBattery",
+        "interface": "VD",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "50",
+            "floor": "01",
+            "room": "01",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 1218,
+                "value": "10.0"
+              }
+            }
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB000000012": {
+        "displayName": "Unknown1",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "ffe",
+            "floor": "01",
+            "room": "01",
+            "outputs": {}
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      },
+      "ABB000000013": {
+        "displayName": "Unknown2",
+        "interface": "TP",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "channels": {
+          "ch0000": {
+            "displayName": "Channel",
+            "functionID": "ffd",
+            "floor": "01",
+            "room": "01",
+            "outputs": {}
+          }
+        },
+        "floor": "01",
+        "room": "01"
+      }
+    }
+  }
+}

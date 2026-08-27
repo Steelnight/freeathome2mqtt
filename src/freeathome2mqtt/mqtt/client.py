@@ -59,6 +59,7 @@ class MqttClient:
         tls_context: SSLContext | None = None,
         keepalive: int = 60,
         homeassistant_discovery_topic: str | None = None,
+        raw_mode_enabled: bool = False,
         backoff_initial: float = 1.0,
         backoff_factor: float = 2.0,
         backoff_cap: float = 60.0,
@@ -88,6 +89,11 @@ class MqttClient:
             self._subscriptions = (
                 *self._subscriptions,
                 topics.ha_birth_topic(homeassistant_discovery_topic),
+            )
+        if raw_mode_enabled:
+            self._subscriptions = (
+                *self._subscriptions,
+                topics.raw_command_subscription(base_topic),
             )
 
         self._will = aiomqtt.Will(

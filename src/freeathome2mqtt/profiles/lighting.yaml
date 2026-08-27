@@ -5,6 +5,11 @@
   description: A simple on/off actuator.
   functions:
     - FID_SWITCH_ACTUATOR
+    # M-Wire switch actuator (docs/03 §9 tier 2, docs/11 WP11): the M-Wire bus's own switch output
+    # behaves exactly like a plain switch_actuator at the datapoint level, so it reuses this
+    # profile rather than duplicating it (CLAUDE.md "profiles are data").
+    - FID_MWIRE_SWITCH_OUTPUT_TYPE0
+    - FID_MWIRE_SWITCH_OUTPUT_TYPE1
   homeassistant:
     component: switch
 

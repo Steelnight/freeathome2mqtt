@@ -53,6 +53,7 @@ from freeathome2mqtt.bus.commands import CommandDispatcher
 from freeathome2mqtt.bus.events import EventPublisher
 from freeathome2mqtt.bus.ingress import Ingress
 from freeathome2mqtt.bus.publisher import Publisher
+from freeathome2mqtt.bus.raw import RawCommandHandler, RawMode, RawStatePublisher, build_raw_map
 from freeathome2mqtt.bus.reconcile import RateLimiter, Reconciler
 from freeathome2mqtt.bus.state import StateStore
 from freeathome2mqtt.homeassistant.components import DiscoveryOptions
@@ -473,6 +474,7 @@ class SupervisorConfig:
     homeassistant_status_topic: str = "homeassistant/status"
     homeassistant_republish_delay_s: float = 5.0
     mqtt_maximum_packet_size: int = 1048576
+    raw_mode: RawMode = False
 
 
 class Supervisor:
@@ -501,6 +503,7 @@ class Supervisor:
         self._rate_limiter: RateLimiter | None = None
         self._reconciler: Reconciler | None = None
         self._commands: CommandDispatcher | None = None
+        self._raw_commands: RawCommandHandler | None = None
         self._device_availability: DeviceAvailabilityPublisher | None = None
         self._discovery_publisher: DiscoveryPublisher | None = None
 
@@ -613,6 +616,7 @@ class Supervisor:
                 if self._config.homeassistant_enabled
                 else None
             ),
+            raw_mode_enabled=self._config.raw_mode is not False,
             backoff_initial=self._config.link_backoff_initial,
             backoff_factor=self._config.link_backoff_factor,
             backoff_cap=self._config.link_backoff_cap,
@@ -671,7 +675,7 @@ class Supervisor:
         new_model = self._compile_and_build_discovery(config)
         self._last_config_hash = _hash_config(config)
         state = self._seed_state(new_model)
-        self._rebuild_dependents(model=new_model, state=state, mqtt=mqtt, rest=rest)
+        self._rebuild_dependents(model=new_model, state=state, mqtt=mqtt, rest=rest, config=config)
 
         for body in ws.drain_buffer():
             self._ingress_or_raise().process_frame(body)
@@ -853,7 +857,13 @@ class Supervisor:
         )
 
     def _rebuild_dependents(
-        self, *, model: Model, state: StateStore, mqtt: MqttClient, rest: RestClient
+        self,
+        *,
+        model: Model,
+        state: StateStore,
+        mqtt: MqttClient,
+        rest: RestClient,
+        config: Configuration,
     ) -> None:
         events = EventPublisher(mqtt=mqtt)
         rate_limiter = RateLimiter(min_interval_s=self._config.get_rate_limit_s)
@@ -864,6 +874,23 @@ class Supervisor:
             rate_limiter=rate_limiter,
             delay_s=self._config.reconcile_delay_s,
         )
+        raw_map = build_raw_map(
+            config, model, mode=self._config.raw_mode, base_topic=self._config.base_topic
+        )
+        raw_publisher = (
+            RawStatePublisher(mqtt=mqtt, topics=raw_map.state_topics)
+            if self._config.raw_mode is not False
+            else None
+        )
+        self._raw_commands = (
+            RawCommandHandler(
+                rest=rest,
+                base_topic=self._config.base_topic,
+                writable_channels=raw_map.writable_channels,
+            )
+            if self._config.raw_mode is not False
+            else None
+        )
         self._model = model
         self._state = state
         self._events = events
@@ -873,6 +900,7 @@ class Supervisor:
             state=state,
             events=events,
             metrics=self.metrics,
+            raw=raw_publisher,
         )
         self._publisher = Publisher(
             entities=model.entities,
@@ -909,6 +937,8 @@ class Supervisor:
     def _on_mqtt_message(self, message: aiomqtt.Message) -> None:
         if self._commands is not None:
             self._commands.on_message(message)
+        if self._raw_commands is not None:
+            self._raw_commands.on_message(message)
         if self._bridge_api is not None:
             self._bridge_api.on_message(message)
         if self._is_ha_birth_message(message):
@@ -979,7 +1009,7 @@ class Supervisor:
             config = await self._fetch_configuration_with_retry()
         new_model = self._compile_and_build_discovery(config)
         self._last_config_hash = _hash_config(config)
-        await self._diff_and_apply(new_model, mqtt=mqtt, rest=rest)
+        await self._diff_and_apply(new_model, mqtt=mqtt, rest=rest, config=config)
         await self._publish_discovery(new_model)
 
         ingress = self._ingress_or_raise()
@@ -999,7 +1029,7 @@ class Supervisor:
         self.metrics.config_reloads += 1
 
     async def _diff_and_apply(
-        self, new_model: Model, *, mqtt: MqttClient, rest: RestClient
+        self, new_model: Model, *, mqtt: MqttClient, rest: RestClient, config: Configuration
     ) -> None:
         """Diff the freshly-fetched truth against the *live* state (not the old model's initial
         snapshot -- values may have moved since compile), mark only what changed dirty (P-23), and
@@ -1015,7 +1045,9 @@ class Supervisor:
                 if old_idx is None or old_state.values[old_idx] != new_state.values[new_idx]:
                     new_state.dirty.add(new_idx)
 
-        self._rebuild_dependents(model=new_model, state=new_state, mqtt=mqtt, rest=rest)
+        self._rebuild_dependents(
+            model=new_model, state=new_state, mqtt=mqtt, rest=rest, config=config
+        )
 
         if old_model is not None:
             removed_ids = sorted(set(old_model.by_id) - set(new_model.by_id))

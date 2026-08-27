@@ -1,0 +1,167 @@
+# Tier-2 environmental sensor profiles (docs/03 §9, docs/11 WP11): air-quality (VOC), carbon
+# monoxide, rain, and wind. Each profile's HA component builder (`sensor`/`binary_sensor`) expects
+# exactly one attribute (`homeassistant/components.py`'s `_sole_attribute`), matching every shipped
+# tier-1 sensor profile's own shape -- a channel with several readable outputs (e.g. FID_VOC's own
+# humidity/CO2-alert/VOC-alert siblings alongside AL_INFO_VOC) still becomes one entity with one
+# primary attribute; the rest are a documented simplification, not silently dropped from the wire.
+
+- id: voc_sensor
+  description: An air-quality sensor reporting a VOC (volatile organic compound) reading.
+  functions:
+    - FID_VOC
+  requires:
+    outputs: [AL_INFO_VOC]
+  homeassistant:
+    component: sensor
+
+  attributes:
+    # ⚠ AL_INFO_VOC's unit (a raw index vs. ppb) is not documented anywhere in docs/01 -- left
+    # unitless pending verification against real hardware (docs/11 guidance #4), rather than
+    # guessing a unit that could be wrong. AL_HUMIDITY/AL_CO2_ALERT/AL_VOC_ALERT/AL_HUMIDITY_ALERT
+    # may also be present on this channel but are not surfaced here (see module docstring above).
+    voc:
+      pairing: AL_INFO_VOC
+      codec: int
+      kind: state
+
+- id: carbon_monoxide_sensor
+  description: A carbon-monoxide alarm sensor.
+  functions:
+    - FID_CARBON_MONOXIDE_SENSOR
+  homeassistant:
+    component: binary_sensor
+    device_class: carbon_monoxide
+
+  attributes:
+    alarm:
+      pairing: AL_CO_ALARM_ACTIVE
+      codec: bool01
+      kind: state
+
+- id: rain_alarm_sensor
+  description: A rain alarm sensor (on/off only, no intensity reading).
+  functions:
+    - FID_RAIN_ALARM_SENSOR
+    - FID_PANEL_RAIN_ALARM_SENSOR
+  homeassistant:
+    component: binary_sensor
+    device_class: moisture
+
+  attributes:
+    rain_alarm:
+      pairing: AL_RAIN_ALARM
+      codec: bool01
+      kind: state
+
+- id: rain_sensor
+  description: A rain sensor reporting an activation percentage (docs/03 §9's fuller variant of
+    rain_alarm_sensor).
+  functions:
+    - FID_RAIN_SENSOR
+  requires:
+    outputs: [AL_RAIN_SENSOR_ACTIVATION_PERCENTAGE]
+  homeassistant:
+    component: sensor
+
+  attributes:
+    # AL_RAIN_SENSOR_FREQUENCY may also be present on this channel; not surfaced here (module
+    # docstring's documented simplification -- one primary attribute per profile).
+    rain_activation:
+      pairing: AL_RAIN_SENSOR_ACTIVATION_PERCENTAGE
+      codec: percent_int
+      kind: state
+      unit: "%"
+
+- id: wind_alarm_sensor
+  description: A wind alarm sensor (on/off only, no speed reading).
+  functions:
+    - FID_WIND_ALARM_SENSOR
+    - FID_PANEL_WIND_ALARM_SENSOR
+  homeassistant:
+    component: binary_sensor
+
+  attributes:
+    wind_alarm:
+      pairing: AL_WIND_ALARM
+      codec: bool01
+      kind: state
+
+- id: wind_sensor
+  description: A wind sensor reporting wind speed (docs/03 §9's fuller variant of
+    wind_alarm_sensor).
+  functions:
+    - FID_WIND_SENSOR
+  requires:
+    outputs: [AL_WIND_SPEED]
+  homeassistant:
+    component: sensor
+    device_class: wind_speed
+
+  attributes:
+    # AL_WIND_FORCE may also be present on this channel; not surfaced here (same simplification).
+    wind_speed:
+      pairing: AL_WIND_SPEED
+      codec: float
+      kind: state
+      precision: 1
+      unit: "m/s"
+
+# The following four are push-button/rocker *sensors* paired to an actuator elsewhere (docs/03
+# §9's "should have" list) -- momentary events, exactly like tier-1's switch_sensor/trigger
+# (docs/01 §6.6). ⚠ Their raw wire encoding (e.g. which value means "up" vs "down") is not
+# documented anywhere in docs/01, so the raw string is passed through verbatim (codec: string)
+# rather than a guessed enum mapping that could be silently backwards -- an honest simplification,
+# not a hallucinated one, pending verification against real hardware (docs/11 guidance #4).
+
+- id: blind_sensor
+  description: A blind/cover rocker sensor -- momentary up/down/stop presses.
+  functions:
+    - FID_BLIND_SENSOR
+  homeassistant:
+    component: event
+
+  attributes:
+    raw:
+      pairing: AL_MOVE_UP_DOWN
+      codec: string
+      kind: event
+
+- id: dimming_sensor
+  description: A dimming rocker sensor -- momentary brighter/darker presses.
+  functions:
+    - FID_DIMMING_SENSOR
+  homeassistant:
+    component: event
+
+  attributes:
+    raw:
+      pairing: AL_RELATIVE_SET_VALUE_CONTROL
+      codec: string
+      kind: event
+
+- id: staircase_light_sensor
+  description: A staircase-light rocker sensor -- a plain switch press paired to an actuator with
+    its own auto-off timer.
+  functions:
+    - FID_STAIRCASE_LIGHT_SENSOR
+  homeassistant:
+    component: event
+
+  attributes:
+    raw:
+      pairing: AL_SWITCH_ON_OFF
+      codec: string
+      kind: event
+
+- id: force_on_off_sensor
+  description: A force-on/off rocker sensor -- overrides a target actuator's normal control.
+  functions:
+    - FID_FORCE_ON_OFF_SENSOR
+  homeassistant:
+    component: event
+
+  attributes:
+    raw:
+      pairing: AL_FORCED
+      codec: string
+      kind: event

@@ -413,6 +413,27 @@ async def test_translation_homeassistant_defaults(tmp_path: Path) -> None:
     assert config.mqtt_maximum_packet_size == 1048576
 
 
+@pytest.mark.parametrize(
+    ("raw_mode_yaml", "expected"),
+    [("false", False), ("true", True), ("unsupported_only", "unsupported_only")],
+)
+async def test_translation_maps_advanced_raw_mode(
+    tmp_path: Path, raw_mode_yaml: str, expected: object
+) -> None:
+    config_yaml = MINIMAL_CONFIG + f"\nadvanced:\n  raw_mode: {raw_mode_yaml}\n"
+    path = _write(tmp_path, config_yaml)
+    settings = load_settings(path, environ={})
+    config = await settings_to_supervisor_config(settings)
+    assert config.raw_mode == expected
+
+
+async def test_translation_raw_mode_defaults_to_false(tmp_path: Path) -> None:
+    path = _write(tmp_path, MINIMAL_CONFIG)
+    settings = load_settings(path, environ={})
+    config = await settings_to_supervisor_config(settings)
+    assert config.raw_mode is False
+
+
 async def test_invalid_mqtt_server_url_is_rejected(tmp_path: Path) -> None:
     # The scheme/hostname check only runs in the translator -- Settings itself accepts any
     # string for mqtt.server, since it's `settings_to_supervisor_config` that needs the URL

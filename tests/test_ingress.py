@@ -12,6 +12,7 @@ import textwrap
 import time
 from collections.abc import Mapping
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -19,6 +20,7 @@ from fakes.fake_broker import running_fake_broker
 from fakes.fake_sysap import FakeSysAp, running_fake_sysap
 from freeathome2mqtt.bus.ingress import Ingress
 from freeathome2mqtt.bus.publisher import Publisher
+from freeathome2mqtt.bus.raw import RawStatePublisher
 from freeathome2mqtt.bus.state import StateStore
 from freeathome2mqtt.metrics import Metrics
 from freeathome2mqtt.model.codecs import build_codec
@@ -104,6 +106,63 @@ def test_process_frame_updates_state_for_a_mapped_datapoint() -> None:
 
     assert state.values[0][0] is True
     assert state.dirty == {0}
+
+
+async def test_process_frame_publishes_raw_state_for_a_mapped_raw_topic() -> None:
+    entities = [_entity(0, ("state",))]
+    state = StateStore(entities)
+    mqtt = AsyncMock()
+    raw = RawStatePublisher(mqtt=mqtt, topics={_key(0): "freeathome2mqtt/raw/K"})
+    ingress = Ingress(
+        entities=entities,
+        ingress_table=_table(0, "bool01", attr_bit=1),
+        state=state,
+        events=_FakeEvents(),
+        metrics=Metrics(),
+        raw=raw,
+    )
+
+    ingress.process_frame({"datapoints": {_key(0): "1"}})
+    await _wait_until(lambda: mqtt.publish.await_count >= 1)
+
+    mqtt.publish.assert_awaited_once_with("freeathome2mqtt/raw/K", b"1", qos=0, retain=True)
+    # The compiled binding still applies too -- raw mode is additive, never a substitute.
+    assert state.values[0][0] is True
+
+
+def test_process_frame_skips_raw_publish_when_the_key_has_no_raw_topic() -> None:
+    entities = [_entity(0, ("state",))]
+    state = StateStore(entities)
+    mqtt = AsyncMock()
+    raw = RawStatePublisher(mqtt=mqtt, topics={})
+    ingress = Ingress(
+        entities=entities,
+        ingress_table=_table(0, "bool01", attr_bit=1),
+        state=state,
+        events=_FakeEvents(),
+        metrics=Metrics(),
+        raw=raw,
+    )
+
+    ingress.process_frame({"datapoints": {_key(0): "1"}})
+
+    mqtt.publish.assert_not_awaited()
+
+
+def test_process_frame_without_a_raw_publisher_is_unaffected() -> None:
+    entities = [_entity(0, ("state",))]
+    state = StateStore(entities)
+    ingress = Ingress(
+        entities=entities,
+        ingress_table=_table(0, "bool01", attr_bit=1),
+        state=state,
+        events=_FakeEvents(),
+        metrics=Metrics(),
+    )
+
+    ingress.process_frame({"datapoints": {_key(0): "1"}})  # must not raise
+
+    assert state.values[0][0] is True
 
 
 def test_process_frame_counts_unmapped_datapoints_without_touching_state() -> None:

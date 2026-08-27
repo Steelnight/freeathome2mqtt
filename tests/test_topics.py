@@ -23,6 +23,9 @@ from freeathome2mqtt.mqtt.topics import (
     entity_state_topic,
     ha_birth_topic,
     ha_discovery_config_topic,
+    raw_command_subscription,
+    raw_set_topic,
+    raw_state_topic,
 )
 
 BASE = "freeathome2mqtt"
@@ -71,6 +74,18 @@ def test_command_subscriptions_are_exactly_the_adr006_set() -> None:
         "freeathome2mqtt/+/get",
         "freeathome2mqtt/bridge/request/#",
     )
+
+
+def test_raw_topics() -> None:
+    assert (
+        raw_state_topic(BASE, "ABB7F500E17A", "ch0000", "odp0000")
+        == "freeathome2mqtt/raw/ABB7F500E17A/ch0000/odp0000"
+    )
+    assert (
+        raw_set_topic(BASE, "ABB7F500E17A", "ch0000", "idp0000")
+        == "freeathome2mqtt/raw/ABB7F500E17A/ch0000/idp0000/set"
+    )
+    assert raw_command_subscription(BASE) == "freeathome2mqtt/raw/+/+/+/set"
 
 
 def test_ha_birth_topic() -> None:

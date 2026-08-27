@@ -363,6 +363,21 @@ def test_compile_excludes_hue_devices_by_default() -> None:
     assert model.stats.devices_excluded_by_interface == 1
 
 
+def test_default_interface_filter_excludes_hue_sonos() -> None:
+    # docs/09 P-17's named test: a native Hue or Sonos integration double-bridging the same
+    # lamp/speaker as this bridge causes state ping-pong (each sees the other's change as
+    # external and re-asserts) -- CompileOptions.excluded_interfaces defaults to both.
+    config = _config(
+        {
+            "ABB700990001": _device({"ch0000": _switch_channel()}, interface="hue"),
+            "ABB700990002": _device({"ch0000": _switch_channel()}, interface="sonos"),
+        }
+    )
+    model = compile(config, _switch_registry(), CompileOptions())
+    assert model.entities == ()
+    assert model.stats.devices_excluded_by_interface == 2
+
+
 def test_compile_excludes_virtual_devices_by_serial_prefix_by_default() -> None:
     config = _config({"6000AB01": _device({"ch0000": _switch_channel()}, interface="VD")})
     model = compile(config, _switch_registry(), CompileOptions())

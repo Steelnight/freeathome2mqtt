@@ -3,7 +3,7 @@
 A high-performance bridge between an **ABB / Busch-Jaeger free@home** System Access Point (SysAP)
 and **MQTT**.
 
-> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP10](docs/11-implementation-plan.md#wp10--home-assistant-discovery)
+> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP11](docs/11-implementation-plan.md#wp11--tier-23-profiles-and-raw-mode)
 > landed.** Bootstrap tooling, the generated pairing/function/parameter/interface code tables, the
 > SysAP settings pre-flight, the capture tool's pseudonymisation, the `minimal`/`typical`/`nasty`
 > configuration fixtures, a real SysAP client (`RestClient`, `WsReader` against a from-scratch fake
@@ -54,11 +54,18 @@ and **MQTT**.
 > republish on the Home Assistant birth message, P-36/P-37); `supervisor.py` now also builds and
 > splits the `bridge/devices` inventory (P-41) and retracts discovery topics left over from a
 > *previous* run (P-35). The new `bench_startup` (a 1000-channel cold start to
-> `bridge/state: online`) meets its P6 budget too, alongside every earlier benchmark. The documents
-> under [`docs/`](docs/) are written to be executed by an implementing agent (human or AI) top to
-> bottom, and
-> [WP11](docs/11-implementation-plan.md#wp11--tier-23-profiles-and-raw-mode) (tier-2/3 profiles and
-> raw mode) is next.
+> `bridge/state: online`) meets its P6 budget too, alongside every earlier benchmark — and now
+> tier-2/3 profiles and raw mode: 16 more profiles (air-quality/CO/rain/wind sensors, the
+> push-button sensors paired to blind/dimming/staircase-light/force-on-off actuators, DES door
+> opener/ringing sensor, Welcome IP mute, inverter/battery/meter power sensors — closes P-17,
+> P-59), the M-Wire switch actuator folded into the existing `switch_actuator` profile, and
+> `bus/raw.py`'s `advanced.raw_mode` pressure valve (`false`/`unsupported_only`/`true`): every
+> output datapoint's raw wire value published verbatim under `<base>/raw/...`, plus a `.../set`
+> topic that writes straight through with no codec or validation, off by default. Tier-3's
+> "virtual battery/inverter/two-way-meter" needed no new profiles at all — a virtual device
+> reports the same functionIDs a physical one would, so `include_virtual_devices: true` already
+> covers it. The documents under [`docs/`](docs/) are written to be executed by an implementing
+> agent (human or AI) top to bottom, and every module below WP11 is still a docstring-only stub.
 
 ---
 

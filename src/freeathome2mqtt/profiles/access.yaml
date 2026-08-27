@@ -1,0 +1,69 @@
+# Tier-2 access/intercom profiles (docs/03 §9, docs/11 WP11): DES door opener, DES door ringing
+# sensor, Welcome IP mute. docs/03 §7's original `des_door_station` transform entry (merging ring
+# events, unlock, and mute into one cross-channel entity) turned out not to fit this codebase's
+# per-channel-one-entity architecture (docs/02 §1) or the `Transform` base class's own contract
+# (a pure function of one entity's own attribute values, never another channel's) -- so, like
+# tier-1's movement_detector + its companion brightness_sensor channel, these are modelled as
+# separate ordinary profiles instead; see docs/03 §7's own note on this.
+
+- id: des_door_opener
+  description: A DES/door-station door-release actuator.
+  functions:
+    - FID_DES_DOOR_OPENER_ACTUATOR
+    - FID_DES_AUTOMATIC_DOOR_OPENER_ACTUATOR
+    - FID_DOOR_OPENER_ACTUATOR_TYPE0
+    - FID_DOOR_OPENER_ACTUATOR_TYPE1
+  requires:
+    outputs: [AL_INFO_DOOR]
+  homeassistant:
+    component: switch
+
+  attributes:
+    state:
+      pairing: AL_INFO_DOOR
+      codec: bool01
+      kind: state
+
+  commands:
+    # Not optimistic: AL_INFO_DOOR reflects the door's actual physical state, not "a release
+    # command was sent" -- marking it optimistically on every command would be misleading.
+    state:
+      pairing: AL_DOOR_OPENER
+      codec: bool01
+
+- id: des_door_ringing_sensor
+  description: A DES/door-station doorbell -- a momentary ring event (docs/01 §6.6's pattern).
+  functions:
+    - FID_DES_DOOR_RINGING_SENSOR
+    - FID_DOOR_RINGING_SENSOR
+  homeassistant:
+    component: event
+    device_class: button
+
+  attributes:
+    ring:
+      pairing: AL_SWITCH_ON_OFF
+      codec: trigger
+      kind: event
+
+- id: welcome_ip_mute
+  description: A Welcome IP intercom's mute switch.
+  functions:
+    - FID_WELCOME_IP_MUTE_SENSOR
+    - FID_WELCOME_IP_MUTE_ACTUATOR
+  requires:
+    outputs: [AL_INFO_MUTE]
+  homeassistant:
+    component: switch
+
+  attributes:
+    state:
+      pairing: AL_INFO_MUTE
+      codec: bool01
+      kind: state
+
+  commands:
+    state:
+      pairing: AL_MEDIA_MUTE
+      codec: bool01
+      optimistic: state

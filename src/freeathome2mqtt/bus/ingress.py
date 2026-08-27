@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from freeathome2mqtt.bus.events import EventPublisher
 from freeathome2mqtt.bus.state import StateStore
@@ -20,6 +20,9 @@ from freeathome2mqtt.metrics import Metrics
 from freeathome2mqtt.model.entity import AttrKind, Binding, Entity
 from freeathome2mqtt.mqtt.client import MqttClientNotConnectedError
 from freeathome2mqtt.sysap.schema import WsFrameBody
+
+if TYPE_CHECKING:
+    from freeathome2mqtt.bus.raw import RawStatePublisher
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +43,16 @@ class Ingress:
         state: StateStore,
         events: EventPublisher,
         metrics: Metrics,
+        raw: RawStatePublisher | None = None,
     ) -> None:
         self._entities = entities
         self._ingress_table = ingress_table
         self._state = state
         self._events = events
         self._metrics = metrics
+        self._raw = raw
+        # Shared by the event-emit path and (when raw_mode is on) the raw-publish path below --
+        # both are the same kind of fire-and-forget background task (docs/02 §4).
         self._event_tasks: set[asyncio.Task[None]] = set()
 
     def process_frame(self, body: WsFrameBody) -> None:
@@ -57,6 +64,10 @@ class Ingress:
             self._process_datapoint(key, raw)
 
     def _process_datapoint(self, key: str, raw: str) -> None:
+        if self._raw is not None:
+            raw_topic = self._raw.topic_for(key)
+            if raw_topic is not None:
+                self._schedule_raw_publish(self._raw, raw_topic, raw)
         binding = self._ingress_table.get(key)
         if binding is None:
             self._metrics.unmapped_datapoints += 1  # filtered-out channel; expected, cheap
@@ -71,6 +82,11 @@ class Ingress:
             self._schedule_event(binding, value)
             return
         self._state.apply(binding.entity_idx, binding.attr_idx, value, attr_bit=binding.attr_bit)
+
+    def _schedule_raw_publish(self, raw_publisher: RawStatePublisher, topic: str, raw: str) -> None:
+        task = asyncio.create_task(raw_publisher.publish(topic, raw))
+        self._event_tasks.add(task)
+        task.add_done_callback(self._event_tasks.discard)
 
     def _schedule_event(self, binding: Binding, value: Any) -> None:
         entity = self._entities[binding.entity_idx]

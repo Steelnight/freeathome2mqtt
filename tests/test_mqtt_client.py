@@ -11,7 +11,11 @@ import pytest
 
 from fakes.fake_broker import running_fake_broker
 from freeathome2mqtt.mqtt.client import MqttClient, MqttClientNotConnectedError
-from freeathome2mqtt.mqtt.topics import WildcardTopicError, command_subscriptions
+from freeathome2mqtt.mqtt.topics import (
+    WildcardTopicError,
+    command_subscriptions,
+    raw_command_subscription,
+)
 
 BASE = "freeathome2mqtt"
 SERIAL = "ABB7F500E17A"
@@ -51,6 +55,23 @@ async def test_bridge_subscribes_only_to_command_topics() -> None:
         finally:
             await client.stop()
             await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_raw_command_topic_subscribed_only_when_raw_mode_enabled() -> None:
+    async with running_fake_broker() as broker:
+        client = _client_for(broker, raw_mode_enabled=True)
+        task = asyncio.create_task(client.run())
+        try:
+            await _wait_until(lambda: raw_command_subscription(BASE) in broker.subscriptions)
+        finally:
+            await client.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_raw_command_topic_not_subscribed_by_default() -> None:
+    async with running_fake_broker() as broker:
+        client = _client_for(broker)
+        assert raw_command_subscription(BASE) not in client.subscriptions
 
 
 async def test_homeassistant_birth_topic_subscribed_when_configured() -> None:

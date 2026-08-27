@@ -86,6 +86,20 @@ def command_subscriptions(base_topic: str) -> tuple[str, ...]:
     )
 
 
+def raw_state_topic(base_topic: str, serial: str, channel_id: str, datapoint_id: str) -> str:
+    """docs/04 §7: the raw wire value of one output datapoint, published verbatim."""
+    return f"{base_topic}/raw/{serial}/{channel_id}/{datapoint_id}"
+
+
+def raw_set_topic(base_topic: str, serial: str, channel_id: str, datapoint_id: str) -> str:
+    return f"{raw_state_topic(base_topic, serial, channel_id, datapoint_id)}/set"
+
+
+def raw_command_subscription(base_topic: str) -> str:
+    """ADR-006: still a narrow, fixed-depth pattern, never `<base_topic>/#`."""
+    return f"{base_topic}/raw/+/+/+/set"
+
+
 def ha_birth_topic(discovery_topic: str) -> str:
     return f"{discovery_topic}/status"
 

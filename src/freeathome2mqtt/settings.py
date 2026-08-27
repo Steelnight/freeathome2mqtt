@@ -12,11 +12,13 @@ docstring promises: a validated `Settings` becomes a `SupervisorConfig`, never t
 see `mqtt/client.py`'s docstring), `homeassistant.legacy_entity_attributes` (its exact shape is not
 specified anywhere in docs/04 §6, so it stays accepted-and-validated rather than guessed at),
 `entities.exclude`/`include` (accepted and validated, not yet enforced by `model.compiler`),
-adaptive coalescing, per-entity command overrides, `advanced.metrics`, `advanced.raw_mode`/
-`cache_config`. Each is a named, deliberate gap, not a silent drop -- the schema still accepts and
-validates them so a `config.yaml` written against the full docs/07 reference loads cleanly today
-and picks up real behaviour as later work packages land. `homeassistant.enabled`/`discovery_topic`/
-`status_topic`/`republish_delay` and `mqtt.maximum_packet_size` are wired as of WP10.
+adaptive coalescing, `advanced.metrics`/`cache_config`. Each is a named, deliberate gap, not a
+silent drop -- the schema still accepts and validates them so a `config.yaml` written against the
+full docs/07 reference loads cleanly today and picks up real behaviour as later work packages land.
+`homeassistant.enabled`/`discovery_topic`/`status_topic`/`republish_delay` and
+`mqtt.maximum_packet_size` are wired as of WP10; `advanced.raw_mode` as of WP11
+(`bus/raw.py`); per-entity `optimistic`/`debounce_ms`/`homeassistant` overrides (via
+`entity/options`, not a `config.yaml` knob) as of the WP10 gap-closing round.
 """
 
 from __future__ import annotations
@@ -452,4 +454,5 @@ async def settings_to_supervisor_config(settings: Settings) -> SupervisorConfig:
         homeassistant_status_topic=settings.homeassistant.status_topic,
         homeassistant_republish_delay_s=settings.homeassistant.republish_delay,
         mqtt_maximum_packet_size=settings.mqtt.maximum_packet_size,
+        raw_mode=settings.advanced.raw_mode,
     )

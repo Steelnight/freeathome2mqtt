@@ -201,6 +201,92 @@ async def test_no_events_lost_during_startup_window(tmp_path: Path) -> None:
             await asyncio.wait_for(task, timeout=5.0)
 
 
+# ------------------------------------------------------------------------------------- raw_mode
+
+
+async def test_raw_mode_true_publishes_raw_state_for_every_output(tmp_path: Path) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL, state="0")}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client, raw_mode=True),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            raw_topic = f"{BASE}/raw/{SERIAL}/ch0000/odp0000"
+
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as observer:
+                await observer.subscribe(raw_topic)
+
+                async def _wait_for_raw_message() -> bytes:
+                    async for message in observer.messages:
+                        return bytes(message.payload)
+                    raise AssertionError("no raw message received")
+
+                waiter = asyncio.create_task(_wait_for_raw_message())
+                await fake.push_ws_frame({"datapoints": {f"{SERIAL}/ch0000/odp0000": "1"}})
+                payload = await asyncio.wait_for(waiter, timeout=5.0)
+
+            assert payload == b"1"
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_raw_mode_false_publishes_no_raw_topic(tmp_path: Path) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL, state="0")}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),  # raw_mode defaults to False
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            assert supervisor._mqtt is not None
+            raw_topic = f"{BASE}/raw/{SERIAL}/ch0000/odp0000"
+
+            await fake.push_ws_frame({"datapoints": {f"{SERIAL}/ch0000/odp0000": "1"}})
+            await _wait_until(lambda: supervisor._state is not None)
+            await asyncio.sleep(0.1)  # let any (unwanted) raw publish have a chance to land
+
+            assert supervisor._mqtt.last_published(raw_topic) is None
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_raw_mode_true_set_topic_writes_through_to_the_sysap(tmp_path: Path) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL, state="0")}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client, raw_mode=True),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as sender:
+                await sender.publish(f"{BASE}/raw/{SERIAL}/ch0000/idp0000/set", b"1")
+            await _wait_until(lambda: _input_value(fake, "ch0000", "idp0000") == "1")
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
 # --------------------------------------------------------------------------------------- resync
 
 
@@ -1050,6 +1136,39 @@ def test_build_bridge_devices_reports_orphaned_channel_reason() -> None:
     assert "orphaned" in channels["ch0002"]["reason"]
 
 
+def test_unsupported_channels_are_reported() -> None:
+    # docs/09 P-59's named test: a channel whose functionID is real and recognised, but that no
+    # shipped profile claims, must still surface in bridge/devices with its raw function ID --
+    # so a user can open a well-formed issue instead of the device being silently invisible
+    # (docs/03 §3.5).
+    config = _configuration(
+        {
+            SERIAL: {
+                "displayName": "Domus Window",
+                "interface": "TP",
+                "floor": "01",
+                "room": "01",
+                "channels": {
+                    "ch0000": {
+                        "displayName": "Contact",
+                        "functionID": "9d",  # FID_DOMUS_WINDOW_CONTACT -- real, no shipped profile
+                        "outputs": {"odp0000": {"pairingID": 53, "value": "1"}},
+                        "floor": "01",
+                        "room": "01",
+                    }
+                },
+            }
+        }
+    )
+    model = compile_model(config, REGISTRY, CompileOptions(topic_prefix=BASE))
+    devices = _build_bridge_devices(config, model, REGISTRY)
+    channel = devices[0]["channels"][0]
+    assert channel["supported"] is False
+    assert channel["function_id"] == "0x9D"
+    assert channel["function"] == "FID_DOMUS_WINDOW_CONTACT"
+    assert channel["reason"] == "no profile claims this function"
+
+
 def test_split_devices_payload_fits_in_one_part_below_the_limit() -> None:
     devices = [{"serial": f"S{i}"} for i in range(5)]
     parts = _split_devices_payload(devices, max_size=1_000_000)
@@ -1163,7 +1282,9 @@ async def test_diff_and_apply_seeds_fresh_state_with_no_old_model(tmp_path: Path
 
             entity = _bare_entity(availability_topic=None)
             model = _bare_model((entity,))
-            await supervisor._diff_and_apply(model, mqtt=supervisor._mqtt, rest=supervisor._rest)
+            await supervisor._diff_and_apply(
+                model, mqtt=supervisor._mqtt, rest=supervisor._rest, config={}
+            )
 
             assert supervisor._model is model
             assert supervisor._state is not None

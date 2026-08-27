@@ -10,7 +10,7 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
 **Read `docs/` before writing code.** This file governs *how* code gets written; `docs/` governs
 *what* gets built and in what order ([`docs/11-implementation-plan.md`](docs/11-implementation-plan.md)).
 
-**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP10`](docs/11-implementation-plan.md#wp10--home-assistant-discovery) landed.**
+**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP11`](docs/11-implementation-plan.md#wp11--tier-23-profiles-and-raw-mode) landed.**
 
 - **WP0** — `pyproject.toml`/`ruff.toml`/strict `mypy`+`pytest` config, the package skeleton
   (docstring-only stubs), CI, the MIT licence decision.
@@ -221,9 +221,39 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
   condition was widened from `{"enabled"}` to `{"enabled", "optimistic", "debounce_ms",
   "homeassistant"}`.
 
-Every module below WP10 is still a docstring-only stub.
-[`docs/11 WP11`](docs/11-implementation-plan.md#wp11--tier-23-profiles-and-raw-mode) (tier-2/3
-profiles and raw mode) is next.
+- **WP11** — Tier-2/3 profiles and raw mode (docs/03 §9; docs/04 §7; ADR-011). Closes P-17, P-59.
+  `profiles/environment.yaml` (VOC/air-quality, carbon-monoxide, rain, rain-alarm, wind,
+  wind-alarm sensors; blind/dimming/staircase-light/force-on-off rocker *sensors* as `codec: string`
+  event-kind passthroughs — their raw wire encoding isn't documented anywhere in docs/01, so the
+  honest choice is verbatim passthrough rather than a guessed enum that could be silently
+  backwards), `profiles/access.yaml` (DES door opener, DES door ringing sensor, Welcome IP mute),
+  `profiles/energy.yaml` (inverter/battery/one-or-two-way-meter power sensors); `profiles/
+  lighting.yaml`'s `switch_actuator` gained the M-Wire switch actuator's two functionIDs rather
+  than a duplicate profile. Two of docs/03 §7's three planned-but-unbuilt transforms turned out not
+  to be needed once checked against reality: `des_door_station` (cross-channel entity merging isn't
+  something the `Transform` base class's per-entity contract can do, so DES door opener/ringing are
+  two ordinary profiles instead, the same way `movement_detector` and its brightness-sensor
+  companion already are two entities) and `energy_meter` (no per-phase L1/L2/L3 pairing exists
+  anywhere in the generated table, so no derivation is needed); `color_light` (full HSV, not just
+  colour temperature) isn't required by any tier-1/2/3 entry at all and is deferred, its wire
+  format unverified. `bus/raw.py` (`build_raw_map`: pure, `SERIAL/chXXXX/odpYYYY -> raw topic` from
+  outputs only — docs/01 §4.1, the WebSocket only ever streams output changes — plus the
+  `(serial, channel_id)` set eligible for a raw write, gated on `advanced.raw_mode`; `RawStatePublisher`
+  publishes retained verbatim; `RawCommandHandler` writes a raw string straight through
+  `RestClient.put_datapoint`, no codec, no validation, no optimism, unlike the ordinary `/set`
+  path); `bus/ingress.py`'s `_process_datapoint` gained an additive raw-publish branch (fire-and-
+  forget, off the P-25 hot path, same tracked-task set the event-emit path already uses);
+  `mqtt/client.py` only adds the `<base>/raw/+/+/+/set` subscription when raw mode is enabled
+  (ADR-006 stays narrow); `mqtt/topics.py` gained the three raw topic helpers.
+  `settings.py`'s already-accepted `advanced.raw_mode` is now actually threaded into
+  `SupervisorConfig`. `tests/fixtures/tier2_tier3.json` (a purpose-built fixture, not `typical.json`
+  — which already matched 100% under tier-1 alone and so wouldn't exercise any of these new
+  profiles) plus its own match-rate test mirror WP4's coverage test, and confirm tier-3's "virtual
+  battery/inverter/two-way-meter" needs no new profiles at all: a virtual device reports the exact
+  same functionIDs a physical one would (docs/01 §4.5), so `include_virtual_devices: true` alone is
+  enough.
+
+Every module below WP11 is still a docstring-only stub.
 
 ---
 

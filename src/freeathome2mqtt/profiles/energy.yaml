@@ -1,0 +1,83 @@
+# Tier-2/3 energy profiles (docs/03 §9, docs/11 WP11): inverter, battery, and (one-/two-way) meter
+# power readings. docs/03 §7's original `energy_meter` transform entry ("multi-phase totals
+# derived from per-phase datapoints") turned out to have no grounding in the generated pairing
+# table (sysap/codes/pairings.py) -- there is no per-phase L1/L2/L3 pairing anywhere in it, only
+# already-totalled readings -- so no transform is needed; see docs/03 §7's own note on this.
+#
+# Tier-3's "virtual energy battery/inverter/two-way meter" needs no separate profiles: a virtual
+# device (docs/01 §4.5) reports the exact same functionIDs a physical one would, so these profiles
+# already cover it once `include_virtual_devices: true` is set (docs/03 §3, `CompileOptions`).
+#
+# A real combo device (e.g. FID_INVERTER_METER_BATTERY) exposing more than one of the three power
+# readings below is a genuine, if rare, ambiguous match between these three profiles -- resolved by
+# model/compiler.py's existing deterministic tie-break (docs/03 §3.4), the same as any other
+# profile-authoring-level ambiguity; not a new failure mode.
+
+- id: energy_inverter
+  description: A solar inverter's current output power.
+  functions:
+    - FID_INVERTER_INFO
+    - FID_ENERGY_INVERTER
+    - FID_INVERTER_METER
+    - FID_INVERTER_BATTERY
+    - FID_INVERTER_METER_BATTERY
+  requires:
+    outputs: [AL_INFO_CURRENT_INVERTER_OUTPUT_POWER]
+  homeassistant:
+    component: sensor
+    device_class: power
+
+  attributes:
+    power:
+      pairing: AL_INFO_CURRENT_INVERTER_OUTPUT_POWER
+      codec: float
+      kind: state
+      precision: 1
+      unit: "W"
+
+- id: energy_battery
+  description: A home battery's current charge/discharge power.
+  functions:
+    - FID_BATTERY_INFO
+    - FID_ENERGY_BATTERY
+    - FID_METER_BATTERY
+    - FID_INVERTER_BATTERY
+    - FID_INVERTER_METER_BATTERY
+  requires:
+    outputs: [AL_INFO_CURRENT_BATTERY_POWER]
+  homeassistant:
+    component: sensor
+    device_class: power
+
+  attributes:
+    # AL_BATTERY_STATUS may also be present on this channel; not surfaced here (one primary
+    # attribute per profile, the same simplification profiles/environment.yaml documents).
+    power:
+      pairing: AL_INFO_CURRENT_BATTERY_POWER
+      codec: float
+      kind: state
+      precision: 1
+      unit: "W"
+
+- id: energy_meter
+  description: A one- or two-way electricity meter's current home power consumption.
+  functions:
+    - FID_METER_INFO
+    - FID_ENERGY_ONE_WAY_METER
+    - FID_ENERGY_TWO_WAY_METER
+    - FID_METER_BATTERY
+    - FID_INVERTER_METER
+    - FID_INVERTER_METER_BATTERY
+  requires:
+    outputs: [AL_INFO_CURRENT_HOME_POWER_CONSUMPTION]
+  homeassistant:
+    component: sensor
+    device_class: power
+
+  attributes:
+    power:
+      pairing: AL_INFO_CURRENT_HOME_POWER_CONSUMPTION
+      codec: float
+      kind: state
+      precision: 1
+      unit: "W"

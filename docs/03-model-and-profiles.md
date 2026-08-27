@@ -366,9 +366,24 @@ The full expected list — do not grow it without justification:
 |---|---|
 | `room_temperature_controller` | HVAC mode is derived from `AL_CONTROLLER_ON_OFF` + `AL_ECO_ON_OFF` + `AL_INFO_HEATING_COOLING_MODE`; setting a mode writes 2–3 datapoints |
 | `cover_with_slats` | Position and slat angle interact; `stop` means different things while moving vs stopped |
-| `color_light` | HSV/RGB packed into one datapoint; brightness interacts with on/off |
-| `energy_meter` | Multi-phase totals derived from per-phase datapoints |
-| `des_door_station` | Ring events, unlock, and mute are separate channels that users expect as one entity |
+
+Three entries once planned for this table, before WP11's actual tier-2/3 profile work (`docs/11
+WP11`) checked them against the generated pairing table (`sysap/codes/pairings.py`) and the real
+per-channel-one-entity architecture (`docs/02 §1`), and turned out not to hold up:
+
+- `des_door_station` ("ring events, unlock, and mute are separate channels that users expect as
+  one entity") would need one entity assembled from *several channels'* datapoints, which the
+  `Transform` base class's own contract can't do — it only ever sees one entity's own `values`,
+  never another channel's. DES door opener and door ringing sensor are modelled as two ordinary
+  profiles instead (`profiles/access.yaml`), the same way tier-1's `movement_detector` and its
+  companion brightness-sensor channel are already two separate entities, not one merged one.
+- `energy_meter` ("multi-phase totals derived from per-phase datapoints") assumed L1/L2/L3-style
+  sub-readings that don't actually exist anywhere in the generated pairing table — every energy/
+  inverter/battery/meter pairing there is already a single, already-totalled reading. Plain
+  multi-attribute profiles need no derivation (`profiles/energy.yaml`).
+- `color_light` (full HSV/RGB, not just colour temperature) isn't required by any tier-1/2/3 entry
+  in `docs/03 §9` at all, and its exact wire packing is unverified (no docs/01 section covers it) --
+  left for a future WP with real hardware to check against, rather than guessed at now.
 
 Transforms run **after** change detection and only for entities that actually changed, so they are
 off the common hot path. They must be pure functions of `values` — no I/O, no clock, no globals —
@@ -422,7 +437,7 @@ A WS frame `{"ABB7F500E17A/ch0003/odp0001": "60"}` becomes: one dict hit, `int(f
 
 ## 9. Profile coverage targets
 
-Derived from the reference implementation's supported set. WP4 delivers tier 1; WP8 tiers 2–3.
+Derived from the reference implementation's supported set. WP4 delivers tier 1; WP11 tiers 2–3.
 
 **Tier 1 — must have**
 switch actuator · dimming actuator · colour-temperature actuator · shutter/blind/awning/attic-window

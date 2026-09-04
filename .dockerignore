@@ -1,0 +1,21 @@
+# Keep the build context small and the layer cache stable (docs/11 WP12) -- only what the
+# Dockerfile actually COPYs belongs in the context at all.
+.git
+.github
+.venv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.hypothesis
+.benchmarks
+.coverage
+__pycache__
+*.pyc
+docs/
+tests/
+*.md
+!README.md
+config.yaml
+config.example.yaml
+docker-compose.example.yml
+data/

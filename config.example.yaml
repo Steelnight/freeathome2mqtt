@@ -1,0 +1,107 @@
+# freeathome2mqtt configuration reference (docs/07 §2; docs/11 WP12).
+#
+# Copy this file to config.yaml, fill in the two required sections below, and mount it into the
+# container read-only at /config.yaml (see docker-compose.example.yml). Every other key here has
+# the default the bridge already uses when the key is simply absent -- delete anything you don't
+# want to override; a 6-line file (sysap.host/username/password + mqtt.server) is a complete,
+# valid configuration.
+#
+# Secrets: never write a real password directly into this file if it will be committed to version
+# control. Three mechanisms exist instead:
+#   !env VAR_NAME        reads the environment variable VAR_NAME at startup
+#   !secret name         reads <advanced.data_dir>/secrets.yaml's `name:` key (a file you keep
+#                         outside version control, permissions 600)
+#   !file /path/to/file  reads the file's contents verbatim (e.g. a Docker/Kubernetes secret
+#                         mounted as a file)
+# `config.yaml` itself is never rewritten by the bridge -- it is your file, not runtime state.
+# Aliases, per-entity options and caches live under advanced.data_dir instead (entities.json,
+# discovery.json), so config.yaml stays safe to keep in version control (secrets aside) and to
+# mount read-only.
+
+# ---------------------------------------------------------------------------------- required
+
+sysap:
+  host: https://192.168.1.50        # the SysAP's local IP or hostname; http:// or https://
+  username: installer                # the "installer" or an admin-level free@home user
+  password: !env FAH_PASSWORD        # set FAH_PASSWORD in the environment (or docker-compose's
+                                      # `environment:`/`env_file:`), or switch to !secret/!file
+
+mqtt:
+  server: mqtt://192.168.1.10:1883  # your MQTT broker; mqtts:// for TLS
+
+# ---------------------------------------------------------------------------------- optional
+# Everything below is shown with its actual default. Uncomment and edit only what you need to
+# change -- an absent key behaves exactly like its default value shown here.
+
+# sysap:
+#   verify_ssl: true                  # set false only for the SysAP's stock self-signed cert
+#   ssl_ca_file: null                 # e.g. /data/sysap-ca.crt, downloadable from the Local API
+#                                      # settings screen -- the safer alternative to verify_ssl: false
+#   max_inflight: 4                   # concurrent HTTP requests to the SysAP (docs/01 §8)
+#   request_timeout: 10               # seconds
+#   ws_heartbeat: 30                  # seconds; do not disable -- the SysAP gives no other sign
+#                                      # of a dead connection (docs/06 §2)
+#   ws_idle_timeout: 90               # force a reconnect after this many seconds of silence
+#   config_refresh_interval: 300      # seconds; periodic full resync even without a WS signal;
+#                                      # 0 disables it
+#   reconnect:
+#     initial: 1                      # seconds before the first reconnect attempt
+#     max: 60                         # backoff ceiling
+#     factor: 2.0                     # backoff multiplier per attempt
+#     jitter: 0.25                    # randomised fraction of the delay
+
+# mqtt:
+#   base_topic: freeathome2mqtt       # every published topic starts with this
+#   client_id: null                   # default: freeathome2mqtt_<sysap_serial>
+#   user: null
+#   password: !env MQTT_PASSWORD
+#   keepalive: 60
+#   ca: null                          # TLS: path to a CA bundle
+#   cert: null                        # TLS: client certificate
+#   key: null                         # TLS: client key
+#   reject_unauthorized: true
+#   maximum_packet_size: 1048576      # bytes; large bridge/devices payloads split below this
+#   qos_state: 0                      # raising this is rarely the right fix (docs/04 §1.1)
+#   qos_discovery: 1
+
+# homeassistant:
+#   enabled: true                     # publish Home Assistant MQTT discovery
+#   discovery_topic: homeassistant
+#   status_topic: homeassistant/status
+#   republish_delay: 5                # seconds after an HA birth message before republishing
+#   legacy_entity_attributes: false
+
+# entities:
+#   topic_style: friendly             # friendly (slugified names) | id (raw entity ids)
+#   include_orphan_channels: false    # channels with no floor/room assigned (docs/01 §4.4)
+#   include_virtual_devices: false    # virtual switches/sensors created via the free@home app
+#   interfaces: [TP, RF, smokealarm, undefined]   # which device interfaces to bridge (docs/01 §4.2);
+#                                      # "hue"/"sonos" are excluded by default -- see the
+#                                      # troubleshooting section in README.md for why
+#   publish_last_changed: true
+#   exclude: []                       # entity ids or glob patterns to never publish
+#   include: []                       # if non-empty, an allowlist applied after exclude
+
+# performance:
+#   coalesce_ms: 20                   # state-publish batching window; 0 = publish immediately
+#   command_debounce_ms: 50           # continuous commands (e.g. a dragged slider) only
+#   optimistic: true                  # assume a command succeeded before the SysAP confirms it
+#   reconcile_after_ms: 3000          # correct an unconfirmed optimistic guess after this long
+#   get_rate_limit_s: 5               # minimum seconds between /get requests, per entity
+
+# availability:
+#   enabled: true
+#   grace_seconds: 10                 # delay before a SysAP drop flips bridge/state to offline
+#   per_device: true                  # also publish per-device unresponsive/defect signals
+
+# advanced:
+#   data_dir: /data                   # persisted state: entities.json, discovery.json, caches
+#   profiles_dir: /data/profiles      # your own channel profiles, merged over the built-in ones
+#   log_level: info                   # error | warning | info | debug
+#   log_to_mqtt: false                # also publish log lines to bridge/logging
+#   log_format: text                  # text | json
+#   raw_mode: false                   # false | unsupported_only | true -- see "my device isn't
+#                                      # supported" in README.md
+#   metrics:
+#     enabled: false                  # optional Prometheus /metrics endpoint
+#     port: 9102

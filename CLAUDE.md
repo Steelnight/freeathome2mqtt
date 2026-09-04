@@ -10,7 +10,7 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
 **Read `docs/` before writing code.** This file governs *how* code gets written; `docs/` governs
 *what* gets built and in what order ([`docs/11-implementation-plan.md`](docs/11-implementation-plan.md)).
 
-**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP11`](docs/11-implementation-plan.md#wp11--tier-23-profiles-and-raw-mode) landed.**
+**Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP12`](docs/11-implementation-plan.md#wp12--release-engineering) landed — every work package in the plan.**
 
 - **WP0** — `pyproject.toml`/`ruff.toml`/strict `mypy`+`pytest` config, the package skeleton
   (docstring-only stubs), CI, the MIT licence decision.
@@ -253,7 +253,74 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
   same functionIDs a physical one would (docs/01 §4.5), so `include_virtual_devices: true` alone is
   enough.
 
-Every module below WP11 is still a docstring-only stub.
+- **WP12** — Release engineering (docs/11 WP12). Closes P-51 (via the soak test), P-60.
+  `metrics_server.py` (`MetricsServer`: a hand-rolled Prometheus text-exposition `/metrics`
+  endpoint over `aiohttp.web` — no `prometheus_client` dependency, matching this project's minimal-
+  dependency-surface bent — serving `Metrics`' six counters; off by default, `advanced.metrics.
+  enabled`/`.port`, wired into `supervisor.py`'s startup/shutdown via `_start_metrics_server_if_
+  enabled`/`_graceful_shutdown` the same lifecycle shape as `MqttClient`'s own `run`/`stop`).
+  `Dockerfile` (multi-stage: a `builder` stage resolves the pinned interpreter/dependencies with
+  `uv` — installed from PyPI rather than copying astral-sh's own image, so the version is
+  verifiable against the same index `uv.lock` resolves against — into a self-contained venv via
+  `uv sync --no-editable`, needed because the `runtime` stage copies only `.venv`, not the source
+  tree; a fixed, non-floating `10001:10001` user so a host bind-mount for `/data` can be `chown`ed
+  predictably; `HEALTHCHECK` runs `--check-config` only — config-parses, no live SysAP/MQTT probe —
+  a deliberate simplification since `TaskDiedTooManyTimesError` already makes a dead supervisor
+  process exit non-zero, so the container restart policy is what actually recovers that; no `tini`
+  baked in, `docker run --init` documented as required instead, for zero image-weight cost) plus
+  `.dockerignore`. `docker-compose.example.yml` (the bridge plus an optional Mosquitto broker) and
+  `config.example.yaml` (every docs/07 §2 key shown commented-out with its real default). Three new
+  `README.md` sections (Installation, Configuration, Troubleshooting — the last cross-referencing
+  docs/06 §6's failure matrix by F-number, plus a "my device isn't supported" walkthrough of
+  `bridge/devices`/`raw_mode`/`--capture`). `tests/test_soak.py` (docs/10 §8's chaos script against
+  the fake SysAP + a real embedded broker — WS drops/hangs, broker restarts, `502` bursts, config
+  changes, continuous traffic with bursts — asserting zero unhandled ERROR-level log records, final
+  state matching the fake's own ground truth, bounded `task_restarts`, and <10% RSS growth via
+  `/proc/self/status`'s live `VmRSS` line, not `ru_maxrss`'s monotonic peak; `FAH2MQTT_SOAK_
+  DURATION_S` scales the run, default 20s locally, 86400 (the literal docs/10 §8 24h) in
+  `.github/workflows/soak.yml`'s nightly cron — the same documented timing deviation `bench_ingest`
+  (WP6) and `bench_resync` (WP8) already established for their own budgets). `tools/compare_bench.
+  py` (a hand-rolled JSON-diff CI regression gate, `bench/baseline.json` vs. a fresh `bench/results.
+  json`, failing past 25% mean growth) and `tools/check_docs_links.py` (walks `docs/**/*.md`,
+  resolves every relative link's target file and, for a `#fragment`, a GitHub-slug-matching heading
+  anchor — `test_real_docs_links_resolve` runs it against the real `docs/` tree as part of the fast
+  suite itself, the same way WP4's profile-coverage test already gates its own row in docs/10 §9's
+  table without a dedicated CI job). `ci.yml` gained three jobs: `container` (multi-arch build-only
+  pass for `linux/amd64,arm64,arm/v7` under QEMU, then a native-arch `--load` build for a smoke
+  test that `--check-config` succeeds against a minimal config mounted at `/config.yaml`), `bench`
+  (main-branch-only per docs/10 §9: runs the full `pytest -m bench` suite so every budget assertion
+  actually runs in CI at all — previously it never did — then `compare_bench.py` against the
+  committed baseline). New `.github/workflows/release.yml` (tag-triggered on `v*`: a fast-suite
+  guard job so a tag pushed at an unverified commit can't ship, then a multi-arch GHCR push and a
+  GitHub release with auto-generated notes).
+
+  **A real doc/reality gap found and corrected in this same commit (CLAUDE.md §4):** docs/10 §7
+  read as if every `tests/bench/` module funnels through pytest-benchmark's `benchmark` fixture and
+  thus into the JSON-diffable baseline comparison. In fact only `test_bench_compile` does — it
+  alone is synchronous, CPU-bound work over plain data structures; the other seven bench tests
+  exercise async I/O against the fake SysAP/broker, where the fixture's synchronous `benchmark()`
+  call doesn't apply, so they've always asserted directly against their own absolute docs/05 §1
+  budget with manual `time.perf_counter()` timing. docs/10 §7 now says so explicitly, names
+  extending the relative-regression comparison to the async benchmarks as a tracked future
+  improvement rather than something WP12 attempted, and notes that CI's `bench` job still runs
+  every one of those seven tests' absolute-budget assertions on every merge to `main` regardless —
+  a real gap closed (bench tests weren't in CI at all before this WP), just not via the exact
+  mechanism the doc originally implied.
+
+  **A named, deliberately unimplemented gap, not a silent one:** a Home Assistant add-on wrapper —
+  its own repo-structure conventions, explicitly marked "optional" in docs/11 WP12's own deliverable
+  list — is not built; `release.yml` says so in its own header comment.
+
+  **An honest limitation of this WP's own verification, not a code gap:** this session's outbound
+  network policy hard-denies `production.cloudfront.docker.com` (Docker Hub's image-blob CDN), so
+  `docker build`/`docker pull` against any docker.io-hosted base image could not be run in this
+  environment — the `Dockerfile` is correct by careful manual review (multi-stage layer order,
+  `--no-editable`'s purpose, the fixed UID, the healthcheck's documented scope) and by matching the
+  same `uv`/Python-pinning conventions already verified elsewhere in this project, but was not
+  build-tested locally. `ci.yml`'s new `container` job runs on GitHub-hosted runners with full
+  registry access, so real verification happens there, on the first push of this branch.
+
+Every work package in the plan (WP0–WP12) has landed.
 
 ---
 

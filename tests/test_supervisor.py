@@ -287,6 +287,61 @@ async def test_raw_mode_true_set_topic_writes_through_to_the_sysap(tmp_path: Pat
             await asyncio.wait_for(task, timeout=5.0)
 
 
+# -------------------------------------------------------------------------------------- metrics
+
+
+async def test_metrics_enabled_serves_live_counters_on_the_configured_port(tmp_path: Path) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        metrics_port = free_port()
+        supervisor = Supervisor(
+            config=_config(
+                tmp_path, broker.port, http_client, metrics_enabled=True, metrics_port=metrics_port
+            ),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            await fake.push_ws_frame({"datapoints": {f"{SERIAL}/ch0000/odp0000": "1"}})
+            await _wait_until(lambda: supervisor.metrics.datapoints_in >= 1)
+
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(f"http://127.0.0.1:{metrics_port}/metrics") as response,
+            ):
+                assert response.status == 200
+                body = await response.text()
+            assert "freeathome2mqtt_datapoints_in 1" in body
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_metrics_disabled_by_default_serves_nothing(tmp_path: Path) -> None:
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),  # metrics_enabled defaults False
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            assert supervisor._metrics_server is None
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
 # --------------------------------------------------------------------------------------- resync
 
 

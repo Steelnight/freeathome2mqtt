@@ -137,6 +137,94 @@ matching, function lookup, name templating and Home Assistant payload rendering 
 into flat lookup tables during startup. The runtime hot path is a dict lookup, a string decode,
 a comparison against the cached value, and a set insertion.
 
+## Installation
+
+**Docker (recommended)**
+
+```bash
+cp config.example.yaml config.yaml   # fill in sysap.host/username/password, mqtt.server
+cp docker-compose.example.yml docker-compose.yml
+mkdir -p data && chown -R 10001:10001 data   # the container runs as a fixed, non-root uid
+docker compose up -d
+```
+
+`docker-compose.example.yml` includes a Mosquitto broker; delete that service and point
+`mqtt.server` at your own broker if you already have one. See its own comments for the details
+(read-only config mount, the `data` volume's ownership, exposing the optional metrics port). The
+image is multi-arch (`amd64`/`arm64`/`arm/v7`) — the same image runs on a Raspberry Pi next to the
+SysAP or on an amd64 server.
+
+**Bare `uv run`, no container**
+
+```bash
+uv sync   # no --group dev needed just to run the bridge
+cp config.example.yaml config.yaml   # edit it, then either export the secret env vars it
+                                      # references or switch its !env tags to !secret/!file
+uv run freeathome2mqtt --config config.yaml --data-dir ./data
+```
+
+**Before either**, validate your config without connecting to anything:
+
+```bash
+uv run freeathome2mqtt --check-config --config config.yaml
+```
+
+and optionally discover your SysAP's address via mDNS if you don't know it:
+
+```bash
+uv run freeathome2mqtt --discover
+```
+
+## Configuration
+
+[`config.example.yaml`](config.example.yaml) is the full reference, fully commented, with every
+key's actual default shown — copy it to `config.yaml` and edit only what you need to change; a
+6-line file (`sysap.host`/`username`/`password` + `mqtt.server`) is already valid. `config.yaml` is
+never rewritten by the bridge (it is your file, safe to keep in version control, secrets aside);
+runtime state — per-entity renames, options, the discovery cache — lives separately under
+`advanced.data_dir` (default `/data`). See [`docs/07-configuration.md`](docs/07-configuration.md)
+for the full schema reference and the three secret mechanisms (`!env`/`!secret`/`!file`).
+
+## Troubleshooting
+
+Every failure mode the bridge is designed to survive is catalogued in
+[`docs/06-resilience.md` §6](docs/06-resilience.md#6-failure-matrix) with its user-visible symptom
+and how the bridge recovers on its own — check there before assuming something is broken. The
+short version of the ones people actually hit:
+
+- **Bridge exits immediately with an auth error.** Bad credentials (`401`) or the Local API is
+  turned off on the SysAP (`403`, with activation instructions in the log). Fatal by design —
+  never silently retries with the wrong password.
+- **Entities go unavailable for a couple of minutes, then come back correct.** The SysAP rebooted
+  (a firmware update, typically) or its Wi-Fi/NAT path dropped silently. The bridge holds
+  `bridge/state` through a grace period rather than flapping, then resyncs in one request.
+  Nothing to do.
+- **Commands feel slow but nothing is lost.** The SysAP is overloaded (`502`s) and the bridge has
+  halved its concurrent request budget to protect it. This recovers on its own; it will not knock
+  the access point over instead.
+- **A device I renamed/added/removed in the free@home app doesn't show up correctly.** Give it a
+  few seconds — topology changes are debounced (2 s, 30 s minimum interval) rather than acted on
+  instantly, so a burst of app edits collapses into one resync instead of many.
+- **A single attribute is stuck at `null`.** A malformed value came back from that specific sensor
+  (`codec_errors` in `bridge/info`, one `WARNING` in the log — never a crash). The rest of the
+  entity, and every other entity, is unaffected.
+
+### My device isn't supported
+
+`bridge/devices` (published on every startup and resync) lists every channel the bridge saw,
+including ones with no matching profile, marked `"supported": false` with their raw function ID and
+why — orphaned (no floor/room), an unrecognised function ID, or a recognised one no shipped profile
+claims yet. That is your starting point for a useful bug report.
+
+In the meantime, `advanced.raw_mode: unsupported_only` in `config.yaml` publishes a raw,
+un-abstracted MQTT topic for exactly those unsupported channels (`<base>/raw/<serial>/<channel>/
+<datapoint>`, plus a `.../set` to write one) — see
+[`docs/04-mqtt-interface.md` §7](docs/04-mqtt-interface.md#7-raw-mode) — so you can drive the
+device today while a profile gets written. `--capture` produces a pseudonymised fixture of your
+installation's configuration you can attach to an issue or a profile pull request without leaking
+anything identifying. Tier-1/2/3 profile coverage and how a channel profile is structured are
+covered in [`docs/03-model-and-profiles.md`](docs/03-model-and-profiles.md).
+
 ## Development
 
 Built and tested with [`uv`](https://docs.astral.sh/uv/). See [`CLAUDE.md`](CLAUDE.md) for the full

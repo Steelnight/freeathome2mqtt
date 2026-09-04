@@ -59,6 +59,7 @@ from freeathome2mqtt.bus.state import StateStore
 from freeathome2mqtt.homeassistant.components import DiscoveryOptions
 from freeathome2mqtt.homeassistant.discovery import DiscoveryPublisher, build_model_discovery
 from freeathome2mqtt.metrics import Metrics
+from freeathome2mqtt.metrics_server import MetricsServer
 from freeathome2mqtt.model.compiler import CompileOptions, Model
 from freeathome2mqtt.model.compiler import compile as compile_model
 from freeathome2mqtt.model.entity import AttrKind, Entity
@@ -475,6 +476,8 @@ class SupervisorConfig:
     homeassistant_republish_delay_s: float = 5.0
     mqtt_maximum_packet_size: int = 1048576
     raw_mode: RawMode = False
+    metrics_enabled: bool = False
+    metrics_port: int = 9102
 
 
 class Supervisor:
@@ -508,6 +511,7 @@ class Supervisor:
         self._discovery_publisher: DiscoveryPublisher | None = None
 
         self._mqtt: MqttClient | None = None
+        self._metrics_server: MetricsServer | None = None
         self._rest: RestClient | None = None
         self._ws: WsReader | None = None
         self._availability: BridgeAvailability | None = None
@@ -602,69 +606,18 @@ class Supervisor:
         check_version_supported(settings.version)
         self._sysap_settings = settings
 
-        mqtt = MqttClient(
-            host=self._config.mqtt_host,
-            port=self._config.mqtt_port,
-            base_topic=self._config.base_topic,
-            sysap_serial=settings.serial_number,
-            username=self._config.mqtt_username,
-            password=self._config.mqtt_password,
-            tls_context=self._config.mqtt_tls,
-            keepalive=self._config.mqtt_keepalive,
-            homeassistant_discovery_topic=(
-                self._config.homeassistant_discovery_topic
-                if self._config.homeassistant_enabled
-                else None
-            ),
-            raw_mode_enabled=self._config.raw_mode is not False,
-            backoff_initial=self._config.link_backoff_initial,
-            backoff_factor=self._config.link_backoff_factor,
-            backoff_cap=self._config.link_backoff_cap,
-            on_message=self._on_mqtt_message,
-            on_reconnected=self._on_mqtt_reconnected,
-            on_disconnected=self._on_mqtt_disconnected,
-        )
+        mqtt = self._build_mqtt_client(settings)
         self._mqtt = mqtt
-        # Handlers are bound methods closing over `self`, so they always see whatever `_model`/
-        # `_rest`/etc. currently are -- constructed once here, never rebuilt on resync, unlike
-        # `_commands` below (docs/04 §5).
-        self._bridge_api = BridgeApi(
-            base_topic=self._config.base_topic, mqtt=mqtt, handlers=self._bridge_api_handlers()
-        )
-        availability = BridgeAvailability(
-            mqtt=mqtt, base_topic=self._config.base_topic, grace_seconds=self._config.grace_seconds
-        )
-        self._availability = availability
-        self._device_availability = DeviceAvailabilityPublisher(mqtt=mqtt)
-        self._discovery_publisher = DiscoveryPublisher(mqtt=mqtt, store=self._discovery_store)
+        availability, device_availability = self._build_mqtt_dependents(mqtt)
 
         self._spawn_supervised("mqtt_client", mqtt.run)
         await _wait_until(lambda: mqtt.reconnect_count >= 1)
+        self._start_metrics_server_if_enabled()
 
-        rest = RestClient(
-            base_url=self._config.sysap_base_url,
-            username=self._config.sysap_username,
-            password=self._config.sysap_password,
-            session=self._http_session,
-            ssl=self._config.sysap_ssl,
-            max_inflight=self._config.sysap_max_inflight,
-        )
+        rest = self._build_rest_client()
         self._rest = rest
 
-        ws = WsReader(
-            url=f"{self._config.sysap_base_url}/fhapi/v1/api/ws",
-            username=self._config.sysap_username,
-            password=self._config.sysap_password,
-            session=self._http_session,
-            ssl=self._config.sysap_ssl,
-            on_frame=self._on_ws_frame,
-            on_connected=self._on_ws_connected,
-            heartbeat=self._config.ws_heartbeat_s,
-            idle_timeout=self._config.ws_idle_timeout_s,
-            backoff_initial=self._config.link_backoff_initial,
-            backoff_factor=self._config.link_backoff_factor,
-            backoff_cap=self._config.link_backoff_cap,
-        )
+        ws = self._build_ws_reader()
         self._ws = ws
         ws.start_buffering()  # armed before the very first connect too (docs/02 §7)
         self._spawn_supervised("ws_reader", ws.run)
@@ -688,7 +641,7 @@ class Supervisor:
         await self._publish_discovery(new_model)
         state.dirty.update(range(len(new_model.entities)))
         await self._publisher_or_raise().flush()
-        await self._device_availability.publish(new_model.entities, config.get("devices", {}))
+        await device_availability.publish(new_model.entities, config.get("devices", {}))
         await self._publish_bridge_devices(config, new_model)
 
         availability.set_model_loaded(True)
@@ -699,6 +652,82 @@ class Supervisor:
         self._config_refresh_task = self._spawn_supervised(
             "config_refresher", self._config_refresh_loop
         )
+
+    def _build_mqtt_client(self, settings: SysApSettings) -> MqttClient:
+        return MqttClient(
+            host=self._config.mqtt_host,
+            port=self._config.mqtt_port,
+            base_topic=self._config.base_topic,
+            sysap_serial=settings.serial_number,
+            username=self._config.mqtt_username,
+            password=self._config.mqtt_password,
+            tls_context=self._config.mqtt_tls,
+            keepalive=self._config.mqtt_keepalive,
+            homeassistant_discovery_topic=(
+                self._config.homeassistant_discovery_topic
+                if self._config.homeassistant_enabled
+                else None
+            ),
+            raw_mode_enabled=self._config.raw_mode is not False,
+            backoff_initial=self._config.link_backoff_initial,
+            backoff_factor=self._config.link_backoff_factor,
+            backoff_cap=self._config.link_backoff_cap,
+            on_message=self._on_mqtt_message,
+            on_reconnected=self._on_mqtt_reconnected,
+            on_disconnected=self._on_mqtt_disconnected,
+        )
+
+    def _build_mqtt_dependents(
+        self, mqtt: MqttClient
+    ) -> tuple[BridgeAvailability, DeviceAvailabilityPublisher]:
+        # Handlers are bound methods closing over `self`, so they always see whatever `_model`/
+        # `_rest`/etc. currently are -- constructed once here, never rebuilt on resync, unlike
+        # `_commands` below (docs/04 §5).
+        self._bridge_api = BridgeApi(
+            base_topic=self._config.base_topic, mqtt=mqtt, handlers=self._bridge_api_handlers()
+        )
+        availability = BridgeAvailability(
+            mqtt=mqtt, base_topic=self._config.base_topic, grace_seconds=self._config.grace_seconds
+        )
+        self._availability = availability
+        device_availability = DeviceAvailabilityPublisher(mqtt=mqtt)
+        self._device_availability = device_availability
+        self._discovery_publisher = DiscoveryPublisher(mqtt=mqtt, store=self._discovery_store)
+        return availability, device_availability
+
+    def _build_rest_client(self) -> RestClient:
+        return RestClient(
+            base_url=self._config.sysap_base_url,
+            username=self._config.sysap_username,
+            password=self._config.sysap_password,
+            session=self._http_session,
+            ssl=self._config.sysap_ssl,
+            max_inflight=self._config.sysap_max_inflight,
+        )
+
+    def _build_ws_reader(self) -> WsReader:
+        return WsReader(
+            url=f"{self._config.sysap_base_url}/fhapi/v1/api/ws",
+            username=self._config.sysap_username,
+            password=self._config.sysap_password,
+            session=self._http_session,
+            ssl=self._config.sysap_ssl,
+            on_frame=self._on_ws_frame,
+            on_connected=self._on_ws_connected,
+            heartbeat=self._config.ws_heartbeat_s,
+            idle_timeout=self._config.ws_idle_timeout_s,
+            backoff_initial=self._config.link_backoff_initial,
+            backoff_factor=self._config.link_backoff_factor,
+            backoff_cap=self._config.link_backoff_cap,
+        )
+
+    def _start_metrics_server_if_enabled(self) -> None:
+        """`advanced.metrics.enabled` (docs/00 §5, docs/11 WP12) -- optional, off by default."""
+        if not self._config.metrics_enabled:
+            return
+        metrics_server = MetricsServer(metrics=self.metrics, port=self._config.metrics_port)
+        self._metrics_server = metrics_server
+        self._spawn_supervised("metrics_server", metrics_server.run)
 
     def _ingress_or_raise(self) -> Ingress:
         if self._ingress is None:
@@ -1428,6 +1457,8 @@ class Supervisor:
         await self._http_session.close()
         if self._mqtt is not None:
             await self._mqtt.stop()
+        if self._metrics_server is not None:
+            await self._metrics_server.stop()
         if self._publisher_task is not None:
             self._publisher_task.cancel()
         if self._config_refresh_task is not None:

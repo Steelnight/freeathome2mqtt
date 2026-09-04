@@ -1,0 +1,44 @@
+name: Soak
+
+# Nightly chaos soak test (docs/10 §8; docs/11 WP12) -- runs tests/test_soak.py for the real
+# 24h duration against the fake SysAP + an embedded broker, asserting zero unhandled exceptions,
+# bounded task restarts, correct final state vs. ground truth, and <10% RSS growth. Deliberately
+# separate from ci.yml: this is nightly/manual only, never per-PR, and needs a job timeout far
+# beyond CI's.
+#
+# --no-cov: the fast suite's coverage floors (CLAUDE.md §1) don't apply to a single-file soak run
+# collecting only tests/test_soak.py -- pytest's default addopts (pyproject.toml) turn on
+# --cov=freeathome2mqtt, which would otherwise fail this job for not exercising the whole tree.
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # nightly, 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      duration_seconds:
+        description: "Soak duration in seconds (default: the real docs/10 §8 24h run)"
+        required: false
+        default: "86400"
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  soak:
+    name: Chaos soak test (docs/10 §8)
+    runs-on: ubuntu-latest
+    # 26h: the 24h run itself plus headroom for setup/teardown -- GitHub Actions allows job
+    # timeouts up to 35 days, so this is well within bounds.
+    timeout-minutes: 1560
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install
+      - run: uv sync --group dev
+      - name: Run soak test
+        env:
+          FAH2MQTT_SOAK_DURATION_S: ${{ github.event.inputs.duration_seconds || '86400' }}
+        run: uv run pytest tests/test_soak.py -m soak -v --no-cov

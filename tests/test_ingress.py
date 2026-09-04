@@ -443,6 +443,9 @@ async def test_ws_reader_never_awaits_io() -> None:
     assert not _has_await(WsReader._dispatch_one)
     assert not _has_await(Ingress.process_frame)
     assert not _has_await(Ingress._process_datapoint)
+    # The scenesTriggered branch is on the same dispatch path and is held to the same rule.
+    assert not _has_await(Ingress._process_scenes)
+    assert not _has_await(Ingress._process_scene_channels)
 
     # Load test: with MQTT publishing artificially slowed, the reader must keep receiving and
     # dispatching every frame without loss or delay -- it must never block on the publisher,
@@ -452,3 +455,129 @@ async def test_ws_reader_never_awaits_io() -> None:
     # 100 x 0.3s slow publishes would take 30s if ingestion were blocked on the publisher; a
     # generous 5s bound conclusively shows it never was.
     assert elapsed < 5.0
+
+
+# ------------------------------------------------------------------------- scenesTriggered
+
+
+def test_process_frame_applies_scene_outputs_to_state() -> None:
+    """docs/01 §5.1: a `scenesTriggered` frame's output values are applied to state.
+
+    "A scene trigger is often the only notification you get for the channels it drove" -- so the
+    outputs it carries go through exactly the same routing as a `datapoints` entry, keyed the same
+    `SERIAL/chXXXX/odpXXXX` way.
+    """
+    entities = [_entity(0, ("state",))]
+    state = StateStore(entities)
+    ingress = Ingress(
+        entities=entities,
+        ingress_table=_table(0, "bool01", attr_bit=1),
+        state=state,
+        events=_FakeEvents(),
+        metrics=Metrics(),
+    )
+
+    ingress.process_frame(
+        {
+            "scenesTriggered": {
+                SERIAL: {
+                    "channels": {
+                        "ch0000": {"outputs": {"odp0000": {"value": "1", "pairingID": 256}}}
+                    }
+                }
+            }
+        }
+    )
+
+    assert state.values[0][0] is True
+    assert state.dirty == {0}
+
+
+async def test_process_frame_emits_entity_events_for_scene_driven_event_attributes() -> None:
+    """An `kind: event` attribute driven by a scene still emits its edge event (docs/01 §5.1's
+    "publish as bridge/entity events"), because scene outputs reuse the ordinary routing.
+    """
+    entities = [_entity(0, ("press",))]
+    state = StateStore(entities)
+    events = _FakeEvents()
+    ingress = Ingress(
+        entities=entities,
+        ingress_table=_table(0, "trigger", kind=AttrKind.EVENT),
+        state=state,
+        events=events,
+        metrics=Metrics(),
+    )
+
+    ingress.process_frame(
+        {
+            "scenesTriggered": {
+                SERIAL: {
+                    "channels": {
+                        "ch0000": {"outputs": {"odp0000": {"value": "1", "pairingID": 256}}}
+                    }
+                }
+            }
+        }
+    )
+    await _wait_until(lambda: len(events.calls) >= 1)
+
+    assert events.calls == [(f"{SERIAL}_ch0000", "press", True, "press")]
+    assert state.dirty == set()  # events never touch the dirty set (ADR-005)
+
+
+def test_process_frame_handles_a_scene_and_datapoints_in_the_same_frame() -> None:
+    """docs/01 §5.1: "A single frame may carry several of these at once"."""
+    entities = [_entity(0, ("state",)), _entity(1, ("state",))]
+    state = StateStore(entities)
+    table = {**_table(0, "bool01", attr_bit=1), **_table(1, "bool01", attr_bit=1)}
+    ingress = Ingress(
+        entities=entities,
+        ingress_table=table,
+        state=state,
+        events=_FakeEvents(),
+        metrics=Metrics(),
+    )
+
+    ingress.process_frame(
+        {
+            "datapoints": {_key(0): "1"},
+            "scenesTriggered": {
+                SERIAL: {
+                    "channels": {
+                        "ch0001": {"outputs": {"odp0000": {"value": "1", "pairingID": 256}}}
+                    }
+                }
+            },
+        }
+    )
+
+    assert state.values[0][0] is True
+    assert state.values[1][0] is True
+    assert state.dirty == {0, 1}
+
+
+def test_process_frame_ignores_malformed_scene_frames() -> None:
+    """Every SysAP payload is untrusted input (CLAUDE.md rule 7): a scene frame whose shape does
+    not match docs/01 §5.1 is skipped, never crashed on and never half-applied.
+    """
+    entities = [_entity(0, ("state",))]
+    state = StateStore(entities)
+    ingress = Ingress(
+        entities=entities,
+        ingress_table=_table(0, "bool01", attr_bit=1),
+        state=state,
+        events=_FakeEvents(),
+        metrics=Metrics(),
+    )
+
+    for malformed in (
+        {"scenesTriggered": {SERIAL: "not-a-dict"}},
+        {"scenesTriggered": {SERIAL: {"channels": "not-a-dict"}}},
+        {"scenesTriggered": {SERIAL: {"channels": {"ch0000": {"outputs": "not-a-dict"}}}}},
+        {"scenesTriggered": {SERIAL: {"channels": {"ch0000": {"outputs": {"odp0000": None}}}}}},
+        {"scenesTriggered": {SERIAL: {"channels": {"ch0000": {"outputs": {"odp0000": {}}}}}}},
+        {"scenesTriggered": "not-a-dict"},
+    ):
+        ingress.process_frame(malformed)  # type: ignore[arg-type]
+
+    assert state.dirty == set()

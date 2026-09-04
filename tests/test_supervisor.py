@@ -2545,3 +2545,73 @@ async def test_dry_run_picks_up_a_persisted_alias(tmp_path: Path) -> None:
         model = await supervisor.dry_run()
         idx = model.by_id[f"{SERIAL}_ch0000"]
         assert model.entities[idx].state_topic == f"{BASE}/kitchen_light"
+
+
+# ------------------------------------------------------------------------- scenesTriggered
+
+
+async def test_scene_triggered_frame_emits_a_bridge_event_and_applies_state(
+    tmp_path: Path,
+) -> None:
+    """docs/01 §5.1 + docs/04 §4.4: a `scenesTriggered` frame drives both halves of the contract.
+
+    The outputs it carries reach `StateStore` through `Ingress` (so the entity's retained state
+    topic updates), and the supervisor emits one non-retained `bridge/event` of type
+    `scene_triggered` naming the scene and the channels it drove.
+    """
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL, state="0")}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            event_topic = f"{BASE}/bridge/event"
+
+            seen: dict[str, bytes] = {}
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as observer:
+                await observer.subscribe(f"{BASE}/#")
+
+                async def _collect() -> None:
+                    async for message in observer.messages:
+                        seen[str(message.topic)] = message.payload
+
+                collector = asyncio.create_task(_collect())
+                try:
+                    await _wait_until(lambda: f"{BASE}/switch" in seen)
+                    await fake.push_ws_frame(
+                        {
+                            "scenesTriggered": {
+                                SERIAL: {
+                                    "channels": {
+                                        "ch0000": {
+                                            "outputs": {"odp0000": {"value": "1", "pairingID": 256}}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    )
+                    await _wait_until(lambda: event_topic in seen, timeout_seconds=5.0)
+                    await _wait_until(
+                        lambda: orjson.loads(seen[f"{BASE}/switch"]).get("state") is True,
+                        timeout_seconds=5.0,
+                    )
+                finally:
+                    collector.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await collector
+
+            event = orjson.loads(seen[event_topic])
+            assert event["type"] == "scene_triggered"
+            assert event["data"]["serial"] == SERIAL
+            assert event["data"]["channels"] == ["ch0000"]
+        finally:
+            await supervisor.stop()
+            await task

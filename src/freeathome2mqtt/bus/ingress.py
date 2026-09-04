@@ -56,12 +56,57 @@ class Ingress:
         self._event_tasks: set[asyncio.Task[None]] = set()
 
     def process_frame(self, body: WsFrameBody) -> None:
-        """Handle one frame's ``datapoints`` (docs/02 §4 step 2). Awaits nothing (rule R1)."""
+        """Handle one frame's ``datapoints`` and ``scenesTriggered`` (docs/02 §4 step 2).
+
+        Awaits nothing (rule R1). A single frame may carry both keys at once (docs/01 §5.1), so
+        neither branch returns early on behalf of the other.
+        """
         datapoints = body.get("datapoints")
-        if not datapoints:
+        if datapoints:
+            for key, raw in datapoints.items():
+                self._process_datapoint(key, raw)
+        scenes = body.get("scenesTriggered")
+        if scenes:
+            self._process_scenes(scenes)
+
+    def _process_scenes(self, scenes: Mapping[str, Any]) -> None:
+        """docs/01 §5.1: apply a scene's carried output values as ordinary datapoints.
+
+        "A scene trigger is often the only notification you get for the channels it drove", so the
+        outputs are re-keyed into the same ``SERIAL/chXXXX/odpXXXX`` form `datapoints` uses and
+        handed to the same routing -- state attributes land in `StateStore` (where change
+        detection makes a duplicate `datapoints` entry for the same value a free no-op), event
+        attributes emit their edge. Nothing here is scene-specific beyond the key reconstruction.
+
+        Every level is shape-checked before use: this is untrusted device input (CLAUDE.md rule
+        7), and a frame that does not match the documented schema is skipped rather than crashing
+        the WS reader mid-dispatch.
+        """
+        if not isinstance(scenes, Mapping):
             return
-        for key, raw in datapoints.items():
-            self._process_datapoint(key, raw)
+        for serial, scene in scenes.items():
+            if not isinstance(scene, Mapping):
+                continue
+            channels = scene.get("channels")
+            if isinstance(channels, Mapping):
+                self._process_scene_channels(serial, channels)
+
+    def _process_scene_channels(self, serial: str, channels: Mapping[str, Any]) -> None:
+        """The inner two levels of `_process_scenes`' walk, split out to keep both within the
+        branch budget CLAUDE.md rule 4 sets (a `noqa` would be the wrong answer there).
+        """
+        for channel_id, channel in channels.items():
+            if not isinstance(channel, Mapping):
+                continue
+            outputs = channel.get("outputs")
+            if not isinstance(outputs, Mapping):
+                continue
+            for datapoint_id, output in outputs.items():
+                if not isinstance(output, Mapping):
+                    continue
+                value = output.get("value")
+                if isinstance(value, str):
+                    self._process_datapoint(f"{serial}/{channel_id}/{datapoint_id}", value)
 
     def _process_datapoint(self, key: str, raw: str) -> None:
         if self._raw is not None:

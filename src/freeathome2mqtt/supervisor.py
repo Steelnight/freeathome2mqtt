@@ -1006,8 +1006,49 @@ class Supervisor:
     def _on_ws_frame(self, body: WsFrameBody) -> None:
         if self._ingress is not None:
             self._ingress.process_frame(body)
+        scenes = body.get("scenesTriggered")
+        if self._cold_start_done and scenes:
+            self._emit_scene_events(scenes)
         if self._cold_start_done and any(body.get(key) for key in _TOPOLOGY_KEYS):
             self._reload_debouncer.request()
+
+    def _emit_scene_events(self, scenes: Mapping[str, Any]) -> None:
+        """docs/04 §4.4's `scene_triggered`, one `bridge/event` per triggered scene.
+
+        `Ingress` already applied the scene's output values to state (docs/01 §5.1); this is the
+        other half of that row -- the announcement that a scene ran at all, which no per-entity
+        state change conveys. Stays synchronous like every other frame-dispatch step (rule R1,
+        P-25): the publish is handed to a tracked background task, never awaited here.
+        """
+        if not isinstance(scenes, Mapping):
+            return
+        for serial, scene in scenes.items():
+            channels = scene.get("channels") if isinstance(scene, Mapping) else None
+            channel_ids = sorted(channels) if isinstance(channels, Mapping) else []
+            self._spawn_background(
+                self._publish_scene_event(serial, channel_ids), name="scene_event"
+            )
+
+    async def _publish_scene_event(self, serial: str, channel_ids: list[str]) -> None:
+        mqtt = self._mqtt
+        if mqtt is None:
+            return
+        try:
+            await mqtt.publish(
+                topics.bridge_event_topic(self._config.base_topic),
+                orjson.dumps(
+                    {
+                        "type": "scene_triggered",
+                        "data": {"serial": serial, "channels": channel_ids},
+                    }
+                ),
+                qos=0,
+                retain=False,
+            )
+        except MqttClientNotConnectedError:
+            # Edge events are never retried (ADR-005: the edge is the signal, not the state) --
+            # logged with context rather than swallowed (CLAUDE.md rule 7).
+            logger.warning("dropped scene_triggered event for %s: MQTT not connected", serial)
 
     def _on_mqtt_message(self, message: aiomqtt.Message) -> None:
         if self._commands is not None:

@@ -545,3 +545,22 @@ def test_valid_max_inflight_base_topic_and_coalesce_ms_are_accepted(tmp_path: Pa
     assert settings.sysap.max_inflight == 8
     assert settings.mqtt.base_topic == "my_custom_topic"
     assert settings.performance.coalesce_ms == 100
+
+
+async def test_translation_maps_advanced_log_to_mqtt(tmp_path: Path) -> None:
+    """docs/07 §2 `advanced.log_to_mqtt` reaches `SupervisorConfig` (docs/04 §4.5).
+
+    It was accepted and validated from WP9 onward but never threaded anywhere, so setting it in
+    `config.yaml` silently did nothing.
+    """
+    path = _write(tmp_path, MINIMAL_CONFIG + "\nadvanced:\n  log_to_mqtt: true\n")
+    settings = load_settings(path, environ={})
+    config = await settings_to_supervisor_config(settings)
+    assert config.log_to_mqtt is True
+
+
+async def test_translation_log_to_mqtt_defaults_to_false(tmp_path: Path) -> None:
+    path = _write(tmp_path, MINIMAL_CONFIG)
+    settings = load_settings(path, environ={})
+    config = await settings_to_supervisor_config(settings)
+    assert config.log_to_mqtt is False

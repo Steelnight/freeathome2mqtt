@@ -28,6 +28,8 @@ fallback beneath any per-entity `entity/options` override) and `availability.ena
 (gating only the per-device `<entity>/availability` signal -- `BridgeAvailability`'s `bridge/state`
 stays unconditional, per ADR-008's "mandatory core plumbing, not a feature") as of a later
 YAGNI-cleanup pass: each was previously validated but silently inert, found and closed together.
+`advanced.log_to_mqtt` was the last of that family, closed once `supervisor.py` grew the
+attach-on-connect/detach-on-shutdown hook `log.MqttLogHandler` had always needed (docs/04 §4.5).
 """
 
 from __future__ import annotations
@@ -475,6 +477,7 @@ async def settings_to_supervisor_config(settings: Settings) -> SupervisorConfig:
         homeassistant_republish_delay_s=settings.homeassistant.republish_delay,
         mqtt_maximum_packet_size=settings.mqtt.maximum_packet_size,
         raw_mode=settings.advanced.raw_mode,
+        log_to_mqtt=settings.advanced.log_to_mqtt,
         metrics_enabled=settings.advanced.metrics.enabled,
         metrics_port=settings.advanced.metrics.port,
     )

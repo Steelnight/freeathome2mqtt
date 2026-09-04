@@ -8,10 +8,11 @@ publish nothing, via `Supervisor.dry_run()`, which never constructs an `MqttClie
 default: run the bridge until a signal or `bridge/request/restart` asks it to stop.
 
 Not wired here, by design: `advanced.log_to_mqtt`. `configure_logging()` runs before any
-`MqttClient` exists (secrets must be redacted from the log from the very first line), and
-`Supervisor` does not yet expose a hook to attach a handler once its `MqttClient` connects and
-detach it before shutdown. `log.MqttLogHandler` is fully implemented and tested standalone
-(`tests/test_log.py`) -- this is the one real, named integration gap left for that hook to land in.
+`MqttClient` exists (secrets must be redacted from the log from the very first line), so
+`log.MqttLogHandler` is attached later, by `Supervisor` itself -- see
+`_attach_mqtt_log_handler_if_enabled`, which adds it to the root logger once MQTT is connected,
+and `_detach_mqtt_log_handler`, which removes and drains it during shutdown while the client can
+still publish.
 """
 
 from __future__ import annotations

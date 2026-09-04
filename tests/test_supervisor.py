@@ -19,13 +19,14 @@ import pytest
 
 from fakes.fake_broker import free_port, running_fake_broker
 from fakes.fake_sysap import FakeSysAp, running_fake_sysap
+from freeathome2mqtt.log import MqttLogHandler
 from freeathome2mqtt.metrics import Metrics
 from freeathome2mqtt.model.compiler import CompileOptions, CompileStats, Model
 from freeathome2mqtt.model.compiler import compile as compile_model
 from freeathome2mqtt.model.entity import AttrKind, Entity
 from freeathome2mqtt.model.profiles import load_profile_registry
 from freeathome2mqtt.mqtt.bridge_api import BridgeApiError
-from freeathome2mqtt.mqtt.client import MqttClient
+from freeathome2mqtt.mqtt.client import MqttClient, MqttClientNotConnectedError
 from freeathome2mqtt.supervisor import (
     _ESCALATION_THRESHOLD,
     Supervisor,
@@ -2757,3 +2758,178 @@ async def test_bridge_info_is_republished_after_a_resync(tmp_path: Path) -> None
         finally:
             await supervisor.stop()
             await task
+
+
+# ----------------------------------------------------------------------------- bridge/logging
+
+
+def _mqtt_log_handlers() -> list[logging.Handler]:
+    return [h for h in logging.getLogger().handlers if isinstance(h, MqttLogHandler)]
+
+
+async def test_log_to_mqtt_publishes_records_to_bridge_logging(tmp_path: Path) -> None:
+    """docs/04 §4.5: opt-in `advanced.log_to_mqtt` mirrors the log stream to `bridge/logging`.
+
+    `MqttLogHandler` has been complete and unit-tested since WP9 but was attached to nothing --
+    `cli.py`'s own module docstring named the missing supervisor hook as the one real integration
+    gap left. This is that hook.
+    """
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client, log_to_mqtt=True),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            topic = f"{BASE}/bridge/logging"
+            seen: list[aiomqtt.Message] = []
+
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as observer:
+                await observer.subscribe(topic)
+
+                async def _collect() -> None:
+                    async for message in observer.messages:
+                        seen.append(message)
+
+                collector = asyncio.create_task(_collect())
+                try:
+                    logging.getLogger("test.log_to_mqtt").warning("hello from the bridge")
+                    await _wait_until(lambda: len(seen) >= 1, timeout_seconds=5.0)
+                finally:
+                    collector.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await collector
+
+            bodies = [orjson.loads(m.payload) for m in seen]
+            mine = [b for b in bodies if b["message"] == "hello from the bridge"]
+            assert mine, bodies
+            assert mine[0]["level"] == "warning"
+            assert mine[0]["logger"] == "test.log_to_mqtt"
+            # A retained log line would replay on every reconnect forever (docs/04 §1.1's
+            # "entity events" rationale applies verbatim to a log stream).
+            assert all(m.retain is False for m in seen)
+        finally:
+            await supervisor.stop()
+            await task
+        assert _mqtt_log_handlers() == []
+
+
+async def test_log_to_mqtt_is_off_by_default_and_attaches_no_handler(tmp_path: Path) -> None:
+    """docs/07 §2: `advanced.log_to_mqtt` defaults to `false`, so the handler must not exist."""
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            assert _mqtt_log_handlers() == []
+        finally:
+            await supervisor.stop()
+            await task
+
+
+# ------------------------------------------------- MQTT-down paths for the three wired features
+
+
+class _DisconnectedMqtt:
+    """Stands in for an `MqttClient` whose broker has gone away mid-operation (docs/06 §6)."""
+
+    def __init__(self) -> None:
+        self.attempts = 0
+        self.reconnect_count = 0  # read by `_build_bridge_info`'s stats block
+
+    async def publish(self, topic: str, payload: bytes, *, qos: int = 0, retain: bool = False):
+        self.attempts += 1
+        raise MqttClientNotConnectedError(topic)
+
+
+async def _offline_supervisor(tmp_path: Path, **overrides: Any) -> Supervisor:
+    """A `Supervisor` that was never started, with a broker-less MQTT stand-in wired in."""
+    async with aiohttp.ClientSession() as session:
+        config = SupervisorConfig(
+            sysap_base_url="http://127.0.0.1:1",
+            sysap_username="installer",
+            sysap_password="secret",
+            mqtt_host="127.0.0.1",
+            mqtt_port=free_port(),
+            base_topic=BASE,
+            data_dir=tmp_path,
+            **overrides,
+        )
+        supervisor = Supervisor(config=config, profiles=REGISTRY, http_session=session)
+    supervisor._mqtt = _DisconnectedMqtt()  # type: ignore[assignment]
+    return supervisor
+
+
+async def test_scene_event_publish_survives_a_disconnected_broker(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """ADR-005: an edge event is never retried, but the drop is logged with context, never
+    swallowed silently (CLAUDE.md rule 7).
+    """
+    supervisor = await _offline_supervisor(tmp_path)
+    with caplog.at_level("WARNING"):
+        await supervisor._publish_scene_event(SERIAL, ["ch0000"])
+    assert "dropped scene_triggered event" in caplog.text
+    assert SERIAL in caplog.text
+
+
+async def test_bridge_info_loop_survives_a_disconnected_broker(tmp_path: Path) -> None:
+    """A broker blip must not kill the republish loop: the retained copy the broker already holds
+    stays valid, and the next tick republishes once the connection is back.
+    """
+    supervisor = await _offline_supervisor(tmp_path, bridge_info_interval_s=0.01)
+    loop_task = asyncio.create_task(supervisor._bridge_info_loop())
+    try:
+        mqtt = supervisor._mqtt
+        assert isinstance(mqtt, _DisconnectedMqtt)
+        await _wait_until(lambda: mqtt.attempts >= 3)
+        assert not loop_task.done()  # still ticking, not dead on the first failure
+    finally:
+        loop_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await loop_task
+
+
+async def test_bridge_info_loop_is_disabled_by_a_non_positive_interval(tmp_path: Path) -> None:
+    """The same `interval <= 0` opt-out `_config_refresh_loop` already uses."""
+    supervisor = await _offline_supervisor(tmp_path, bridge_info_interval_s=0)
+    async with asyncio.timeout(2.0):
+        await supervisor._bridge_info_loop()  # returns instead of looping
+    assert supervisor._mqtt.attempts == 0  # type: ignore[union-attr]
+
+
+async def test_mqtt_log_handler_publish_is_silent_when_the_broker_is_gone(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The log sink must not log its own publish failures -- that is how a broker outage becomes
+    a feedback loop. The stream handler still carries the original record regardless.
+    """
+    supervisor = await _offline_supervisor(tmp_path, log_to_mqtt=True)
+    mqtt = supervisor._mqtt
+    assert isinstance(mqtt, _DisconnectedMqtt)
+    supervisor._attach_mqtt_log_handler_if_enabled(mqtt)  # type: ignore[arg-type]
+    try:
+        assert _mqtt_log_handlers() != []
+        with caplog.at_level("WARNING"):
+            logging.getLogger("test.offline_sink").warning("into the void")
+            await asyncio.sleep(0)  # let the scheduled publish task run
+            await supervisor._detach_mqtt_log_handler()
+        assert mqtt.attempts >= 1  # it really did try
+        assert "MQTT not connected" not in caplog.text  # ...and said nothing about failing
+    finally:
+        await supervisor._detach_mqtt_log_handler()
+    assert _mqtt_log_handlers() == []

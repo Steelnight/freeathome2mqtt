@@ -60,6 +60,7 @@ from freeathome2mqtt.bus.reconcile import RateLimiter, Reconciler
 from freeathome2mqtt.bus.state import StateStore
 from freeathome2mqtt.homeassistant.components import DiscoveryOptions
 from freeathome2mqtt.homeassistant.discovery import DiscoveryPublisher, build_model_discovery
+from freeathome2mqtt.log import MqttLogHandler
 from freeathome2mqtt.metrics import Metrics
 from freeathome2mqtt.metrics_server import MetricsServer
 from freeathome2mqtt.model.compiler import (
@@ -474,6 +475,7 @@ class SupervisorConfig:
     availability_enabled: bool = True
     availability_per_device: bool = True
     config_refresh_interval_s: float = 300.0
+    log_to_mqtt: bool = False
     bridge_info_interval_s: float = _BRIDGE_INFO_INTERVAL_S
     reload_debounce_s: float = _RELOAD_DEBOUNCE_S
     reload_min_interval_s: float = _RELOAD_MIN_INTERVAL_S
@@ -542,6 +544,7 @@ class Supervisor:
         self._publisher_task: asyncio.Task[None] | None = None
         self._config_refresh_task: asyncio.Task[None] | None = None
         self._bridge_info_task: asyncio.Task[None] | None = None
+        self._mqtt_log_handler: MqttLogHandler | None = None
         self._background_tasks: set[asyncio.Task[None]] = set()
 
         self._shutdown_event = asyncio.Event()
@@ -629,6 +632,7 @@ class Supervisor:
 
         self._spawn_supervised("mqtt_client", mqtt.run)
         await _wait_until(lambda: mqtt.reconnect_count >= 1)
+        self._attach_mqtt_log_handler_if_enabled(mqtt)
         self._start_metrics_server_if_enabled()
 
         rest, ws = await self._resolve_sysap_credentials(settings)
@@ -776,6 +780,47 @@ class Supervisor:
             backoff_factor=self._config.link_backoff_factor,
             backoff_cap=self._config.link_backoff_cap,
         )
+
+    def _attach_mqtt_log_handler_if_enabled(self, mqtt: MqttClient) -> None:
+        """docs/04 §4.5 `advanced.log_to_mqtt`: mirror the log stream to `bridge/logging`.
+
+        Attached here rather than in `configure_logging()` because that runs before any
+        `MqttClient` exists -- secrets must be redacted from the very first line, long before a
+        broker connection is possible (`cli.py`'s docstring named this ordering as the reason the
+        handler stayed unwired). Added to the root logger, not swapped in, so the stream handler
+        `configure_logging` installed keeps receiving everything too.
+
+        Non-retained QoS 0: a retained log line would replay on every reconnect forever, which is
+        docs/04 §1.1's "entity events" rationale applied to a log stream.
+        """
+        if not self._config.log_to_mqtt:
+            return
+        topic = topics.bridge_logging_topic(self._config.base_topic)
+
+        async def _publish(payload: bytes) -> None:
+            try:
+                await mqtt.publish(topic, payload, qos=0, retain=False)
+            except MqttClientNotConnectedError:
+                # Deliberately silent, not logged: this *is* the log sink, and logging a failure
+                # to publish a log line is how a broker outage turns into a feedback loop. The
+                # stream handler still has the original record either way.
+                return
+
+        handler = MqttLogHandler(
+            publish=_publish,
+            secrets=(self._config.sysap_password, self._config.mqtt_password),
+        )
+        self._mqtt_log_handler = handler
+        logging.getLogger().addHandler(handler)
+
+    async def _detach_mqtt_log_handler(self) -> None:
+        """Remove the handler and drain what it already scheduled, before MQTT is torn down."""
+        handler = self._mqtt_log_handler
+        if handler is None:
+            return
+        self._mqtt_log_handler = None
+        logging.getLogger().removeHandler(handler)
+        await handler.flush_pending()
 
     def _start_metrics_server_if_enabled(self) -> None:
         """`advanced.metrics.enabled` (docs/00 §5, docs/11 WP12) -- optional, off by default."""
@@ -1587,6 +1632,9 @@ class Supervisor:
                 self._availability.publish_forced_offline(), what="bridge/state offline"
             )
         await self._entities_store.save()
+        # Before the connections close below: the handler must stop producing, and drain what it
+        # already scheduled, while `mqtt` can still publish it.
+        await self._detach_mqtt_log_handler()
         if self._ws is not None:
             await self._ws.stop()
         await self._http_session.close()

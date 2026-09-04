@@ -314,11 +314,18 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
   **An honest limitation of this WP's own verification, not a code gap:** this session's outbound
   network policy hard-denies `production.cloudfront.docker.com` (Docker Hub's image-blob CDN), so
   `docker build`/`docker pull` against any docker.io-hosted base image could not be run in this
-  environment — the `Dockerfile` is correct by careful manual review (multi-stage layer order,
-  `--no-editable`'s purpose, the fixed UID, the healthcheck's documented scope) and by matching the
-  same `uv`/Python-pinning conventions already verified elsewhere in this project, but was not
-  build-tested locally. `ci.yml`'s new `container` job runs on GitHub-hosted runners with full
-  registry access, so real verification happens there, on the first push of this branch.
+  environment — the `Dockerfile` was reviewed carefully by hand (multi-stage layer order,
+  `--no-editable`'s purpose, the fixed UID, the healthcheck's documented scope) and matches the
+  same `uv`/Python-pinning conventions already verified elsewhere in this project, but manual
+  review is not the same thing as a real build, and it missed a real bug: `ci.yml`'s `container`
+  job, running on GitHub-hosted runners with full registry access, caught it on the first push —
+  `uvloop` has no prebuilt wheel yet for Python 3.14 on these platforms, so `uv sync` fell back to
+  a from-source build that needs a C compiler `python:3.14.7-slim`'s `builder` stage didn't have
+  (`configure: error: no acceptable C compiler found in $PATH`). Fixed by installing
+  `build-essential` in the `builder` stage only — the `runtime` stage copies just `.venv`, so this
+  costs nothing in the shipped image. This is exactly the gap this note originally named: real
+  container verification needed GitHub's runners, not this session's own judgement, and that is
+  what caught it.
 
 Every work package in the plan (WP0–WP12) has landed.
 

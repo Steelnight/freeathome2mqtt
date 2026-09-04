@@ -11,6 +11,13 @@
 
 FROM python:3.14.7-slim AS builder
 
+# uvloop has no prebuilt wheel yet for every target platform on this freshly-pinned Python 3.14
+# (docs/00 §5), so `uv sync` below falls back to building it from source, which needs a C
+# compiler -- `python:3.14.7-slim` doesn't ship one. This only touches the `builder` stage; the
+# `runtime` stage copies just `.venv` (see below), so the final image gains no size from it.
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 # uv (docs/00 §5's tooling choice), pinned like every other dependency in this project -- via pip
 # from PyPI rather than copying the astral-sh/uv image's binary, so the version is verifiable
 # against the same index `uv.lock` itself resolves against, with no second registry to trust.

@@ -120,7 +120,7 @@ src/freeathome2mqtt/
 ├── persistence.py              # entities.json, config cache, atomic writes
 ├── metrics.py                  # counters/histograms -> bridge/info + optional Prometheus
 └── tools/
-    ├── capture.py              # record a live SysAP into a test fixture
+    ├── capture.py              # record a live SysAP into a test fixture (also wired to cli.py --capture)
     └── gen_codes.py            # regenerate sysap/codes/
 ```
 

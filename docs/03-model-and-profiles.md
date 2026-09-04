@@ -217,7 +217,7 @@ forking.
 | `codec` | yes | |
 | `values` | when `codec: enum` | Symbolic name → raw string (note: the *inverse* direction of an attribute's map) |
 | `range` | no | `[min, max]`, clamped |
-| `continuous` | no, default `false` | Debounce this command |
+| `continuous` | no, default `false` | Debounce this command ([`docs/05 §4.2`](05-performance.md#42-command-debouncing)) |
 | `optimistic` | no | Attribute name to update optimistically; omit to disable optimism for this command |
 | `confirm` | no, default `true` | Whether to expect a WS echo and reconcile if absent |
 | *(any other key)* | no | Passed to the codec factory verbatim, as for the attribute object above — `CommandSpec.codec_params` in `model/entity.py`. |

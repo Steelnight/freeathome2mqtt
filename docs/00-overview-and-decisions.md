@@ -172,7 +172,7 @@ At startup, after fetching the configuration snapshot, walk every device → cha
 
 - `ingress: dict[str, Binding]` keyed by the exact WebSocket datapoint key
   (`"{serial}/{channel}/{odp}"`) → `(entity_index, attribute_index, codec, kind)`.
-- `egress: dict[tuple[int, int], EgressBinding]` keyed by `(entity_index, command_index)` →
+- `egress: dict[tuple[int, str], EgressBinding]` keyed by `(entity_index, command_name)` →
   the pre-formatted REST path `"{serial}.{channel}.{idp}"` plus the encoder.
 - `discovery: list[bytes]` — Home Assistant payloads pre-serialised, ready to publish verbatim.
 

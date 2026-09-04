@@ -67,8 +67,10 @@ payload.
 ### P-08 — Brightness `0` used for off
 **Symptom** Setting brightness 0 leaves the light on at minimum, or the SysAP rejects the write.
 **Cause** `AL_ABSOLUTE_SET_VALUE_CONTROL` accepts `1..100`.
-**Mitigation** `range: [1, 100]` clamps; on/off is a separate command. HA's JSON light schema is
-handled by the profile mapping `brightness: 0` to `state: false`.
+**Mitigation** `range: [1, 100]` clamps a literal `0` (or anything else out of bounds) up to `1`
+rather than sending an invalid write; turning the light fully off is the separate `state` command,
+which HA's JSON light schema (`schema: "json"`) sends independently of `brightness` — no
+cross-command redirect is needed.
 **Test** `test_brightness_zero_maps_to_off`
 
 ### P-09 — Colour temperature treated as Kelvin

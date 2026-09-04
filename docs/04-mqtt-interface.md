@@ -67,7 +67,7 @@ Rules:
 
 - `id` is always present and immutable — key on it, not on the topic.
 - Unknown/uninitialised datapoints are `null`, never `0` or `false`.
-- `last_changed` is opt-in (`publish_last_changed`, default `true`). Note that it changes on every
+- `last_changed` is on by default and opt-out (`publish_last_changed`, default `true`). Note that it changes on every
   publish, which defeats byte-comparison deduplication for consumers; it is a genuine trade-off, so
   it is a flag.
 - Attribute names are stable per profile. Adding an attribute to a profile is a minor change;
@@ -411,7 +411,9 @@ useful middle ground, and the recommended setting for anyone filing an issue.
   the broker on the other end (see the comment at the top of `mqtt/client.py`). The bridge speaks
   MQTT 3.1.1 only until that combination is fixed upstream or worked around differently.
 - After reconnect, retained messages are republished once (2 s later) for brokers that do not
-  persist retained state across restarts. The echo-based cancellation ("stop once the broker
-  proves it did retain, by echoing `bridge/info` back") is deferred to WP9, when `bridge/info`
-  exists; WP5 republishes unconditionally on every connect instead, which is simply the same fix
-  applied slightly more often than strictly necessary, not incorrect.
+  persist retained state across restarts. This is unconditional: the bridge does not subscribe
+  to its own output topics ([ADR-006](00-overview-and-decisions.md#adr-006)), so it cannot
+  detect whether the broker retained them, and a single idempotent republish is cheap
+  ([`docs/06 §6`](06-resilience.md#6-failure-matrix) F8). (An earlier plan sketched an echo-based
+  cancellation via `bridge/info`, deferred to WP9 — WP9 landed without it, and no later WP added
+  it either, so unconditional republish is the permanent design, not a stopgap.)

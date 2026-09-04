@@ -218,7 +218,7 @@ Assertions at the end:
 | `pytest -m "not bench and not soak"` | Coverage floors |
 | Profile schema validation | Every YAML validates against `_schema.json` |
 | `gen_codes.py --check` | Generated files are byte-identical to committed ones (P-58) |
-| Profile coverage | ≥ 85 % of channels in `captured/*.json` match a profile |
+| Profile coverage | ≥ 85 % of channels in `captured/*.json` match a profile — **conditional**: skipped (not failed) until at least one real capture is committed, since captures require hardware (P-60) and none exists before M2. WP4/WP11 gate coverage against the authored `typical.json`/`tier2_tier3.json` fixtures in the meantime; the gate becomes blocking the moment a `captured/*.json` lands. |
 | Docs links | Every relative link (and `#fragment`) in `docs/` resolves — `tools/check_docs_links.py`, gated by `test_real_docs_links_resolve` inside the `pytest -m "not bench and not soak"` row above rather than a separate CI job, the same way profile coverage above is |
 | `pytest -m bench` | Regression gate vs. baseline (main branch only, §7) |
 | Container build | Multi-arch, plus a smoke test that the image starts and `--check-config` passes |

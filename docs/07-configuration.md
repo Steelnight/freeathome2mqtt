@@ -16,6 +16,10 @@
 
 ## 2. `config.yaml`
 
+The `sysap:` and `mqtt:` sections below are shown split into a "required" and an "optional"
+block for exposition. In a real file each top-level key appears **once** with its subkeys
+merged — the listing below is not valid YAML as printed (duplicate top-level keys).
+
 ```yaml
 # ---------------------------------------------------------------- required
 sysap:

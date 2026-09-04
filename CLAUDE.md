@@ -11,6 +11,10 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
 *what* gets built and in what order ([`docs/11-implementation-plan.md`](docs/11-implementation-plan.md)).
 
 **Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP12`](docs/11-implementation-plan.md#wp12--release-engineering) landed — every work package in the plan.**
+**The follow-on plan is [`docs/12`](docs/12-quality-of-life-and-performance.md)** — six further
+packages (WP13–WP18) covering the two unmeasured performance budgets, `bridge/info`
+observability, `scenesTriggered`, the still-inert `config.yaml` knobs, the two optional
+optimisations docs/05 specifies, and operations/Home Assistant polish.
 
 - **WP0** — `pyproject.toml`/`ruff.toml`/strict `mypy`+`pytest` config, the package skeleton
   (docstring-only stubs), CI, the MIT licence decision.

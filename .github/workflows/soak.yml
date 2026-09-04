@@ -1,10 +1,21 @@
 name: Soak
 
-# Nightly chaos soak test (docs/10 §8; docs/11 WP12) -- runs tests/test_soak.py for the real
-# 24h duration against the fake SysAP + an embedded broker, asserting zero unhandled exceptions,
-# bounded task restarts, correct final state vs. ground truth, and <10% RSS growth. Deliberately
-# separate from ci.yml: this is nightly/manual only, never per-PR, and needs a job timeout far
-# beyond CI's.
+# Nightly chaos soak test (docs/10 §8; docs/11 WP12) -- runs tests/test_soak.py against the fake
+# SysAP + an embedded broker, asserting zero unhandled exceptions, bounded task restarts, correct
+# final state vs. ground truth, and <10% RSS growth. Deliberately separate from ci.yml: this is
+# nightly/manual only, never per-PR, and needs a job timeout far beyond CI's.
+#
+# 5 hours, not docs/10 §8's literal 24: a job on a GitHub-hosted runner is terminated at 6 hours
+# of execution time, and that is a hard platform cap -- `timeout-minutes` can only lower it, never
+# raise it (its 360-minute default already *is* the maximum there; the 5-day ceiling applies to
+# self-hosted runners only). An 86400-second run on ubuntu-latest cannot finish; it would be
+# killed at 6h and reported as a failure. 18000s leaves an hour of headroom for setup, teardown
+# and the final ground-truth comparison.
+#
+# This only became load-bearing once the soak started honouring its duration at all. The chaos
+# loop used to advance a nominal counter rather than the clock, so every run -- 20s or 86400 --
+# returned in about two seconds and the 6h cap was never approached. Run the literal 24h by
+# dispatching this workflow with duration_seconds=86400 against a self-hosted runner.
 #
 # --no-cov: the fast suite's coverage floors (CLAUDE.md §1) don't apply to a single-file soak run
 # collecting only tests/test_soak.py -- pytest's default addopts (pyproject.toml) turn on
@@ -16,9 +27,9 @@ on:
   workflow_dispatch:
     inputs:
       duration_seconds:
-        description: "Soak duration in seconds (default: the real docs/10 §8 24h run)"
+        description: "Soak duration in seconds (default 18000 = 5h; 86400 needs a self-hosted runner)"
         required: false
-        default: "86400"
+        default: "18000"
 
 concurrency:
   group: ${{ github.workflow }}
@@ -28,9 +39,9 @@ jobs:
   soak:
     name: Chaos soak test (docs/10 §8)
     runs-on: ubuntu-latest
-    # 26h: the 24h run itself plus headroom for setup/teardown -- GitHub Actions allows job
-    # timeouts up to 35 days, so this is well within bounds.
-    timeout-minutes: 1560
+    # 5.5h: the 5h run plus headroom, still under the 6h (360 min) hard cap a GitHub-hosted
+    # runner enforces regardless of what is written here.
+    timeout-minutes: 330
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
@@ -40,5 +51,5 @@ jobs:
       - run: uv sync --group dev
       - name: Run soak test
         env:
-          FAH2MQTT_SOAK_DURATION_S: ${{ github.event.inputs.duration_seconds || '86400' }}
+          FAH2MQTT_SOAK_DURATION_S: ${{ github.event.inputs.duration_seconds || '18000' }}
         run: uv run pytest tests/test_soak.py -m soak -v --no-cov

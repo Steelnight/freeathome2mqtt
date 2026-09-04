@@ -208,6 +208,21 @@ Assertions at the end:
 - Final state matches the fake SysAP's ground truth for **every** entity — the strongest possible
   statement that no resync path loses data.
 - `task_restarts` == expected; no escalations.
+- The chaos phase actually consumed the wall-clock duration it was given. This reads like a
+  tautology and is not one: the loop originally advanced a nominal counter by `duration_s / 10`
+  per cycle rather than reading the clock, so it ran exactly ten cycles for *any* duration and
+  returned in under a second. Every assertion above still passed, on a run that had soaked for no
+  time at all. A soak with no elapsed time cannot observe the things a soak exists to observe.
+
+**Duration in CI.** `FAH2MQTT_SOAK_DURATION_S` sets the run length: 20 s by default so the harness
+is exercised locally, **18000 s (5 h)** on the nightly cron. Not the literal 24 h above: a job on a
+GitHub-hosted runner is terminated at 6 hours of execution time, a hard platform cap that
+`timeout-minutes` can lower but never raise. The 24 h figure is reachable only on a self-hosted
+runner, by dispatching `soak.yml` with `duration_seconds=86400`. Chaos *frequency* still scales
+with the run and is capped at one cycle per 5 minutes, so the 5 h run produces a WS drop or hang
+every 5 minutes and a config change every 20 — within the ranges this section specifies — rather
+than the same ten events spread thinner. This is the same class of documented deviation as
+`bench_ingest`'s traffic window (§7).
 
 ## 9. CI pipeline
 

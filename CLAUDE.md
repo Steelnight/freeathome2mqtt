@@ -277,9 +277,19 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
   changes, continuous traffic with bursts — asserting zero unhandled ERROR-level log records, final
   state matching the fake's own ground truth, bounded `task_restarts`, and <10% RSS growth via
   `/proc/self/status`'s live `VmRSS` line, not `ru_maxrss`'s monotonic peak; `FAH2MQTT_SOAK_
-  DURATION_S` scales the run, default 20s locally, 86400 (the literal docs/10 §8 24h) in
-  `.github/workflows/soak.yml`'s nightly cron — the same documented timing deviation `bench_ingest`
-  (WP6) and `bench_resync` (WP8) already established for their own budgets). `tools/compare_bench.
+  DURATION_S` scales the run, default 20s locally, 18000s (5h) in `.github/workflows/soak.yml`'s
+  nightly cron — the same documented timing deviation `bench_ingest` (WP6) and `bench_resync`
+  (WP8) already established for their own budgets). **Two corrections landed here in the
+  post-WP12 YAGNI round, both of which had left the soak passing while proving nothing:** the
+  chaos loop advanced a nominal counter by `duration_s / 10` per cycle instead of reading the
+  clock, so it ran exactly ten cycles for *any* duration and the whole phase returned in ~2s —
+  the nightly "24 hour" soak included; and `soak.yml` asked for the literal 86400 under
+  `timeout-minutes: 1560`, which a GitHub-hosted runner cannot honour at all (a job there is
+  killed at 6h, a hard cap `timeout-minutes` can only lower). The loop is now wall-clock driven
+  with per-cycle pacing, the test asserts it consumed ≥90% of the duration it was given, chaos
+  spacing is capped at 5 minutes so a long run gets proportionally more chaos, and the nightly
+  runs 5h — with the literal 24h reachable only by dispatching the workflow against a self-hosted
+  runner. `tools/compare_bench.
   py` (a hand-rolled JSON-diff CI regression gate, `bench/baseline.json` vs. a fresh `bench/results.
   json`, failing past 25% mean growth) and `tools/check_docs_links.py` (walks `docs/**/*.md`,
   resolves every relative link's target file and, for a `#fragment`, a GitHub-slug-matching heading

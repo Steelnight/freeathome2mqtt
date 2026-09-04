@@ -23,13 +23,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 # against the same index `uv.lock` itself resolves against, with no second registry to trust.
 RUN pip install --no-cache-dir --root-user-action=ignore uv==0.12.9
 
-WORKDIR /build
+# Same path as the runtime stage's WORKDIR below, on purpose: uv bakes the venv's absolute path
+# into its generated console-script shebangs (e.g. `.venv/bin/freeathome2mqtt`'s `#!/…/python3`)
+# at install time. Building at a different path (the previous `/build`) and then copying to `/app`
+# left those shebangs pointing at an interpreter path that doesn't exist in the runtime image --
+# `exec: no such file or directory` -- caught by ci.yml's own container smoke test.
+WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 
 # Dependencies first, source second: the dependency layer only invalidates when pyproject.toml/
 # uv.lock actually change, not on every source edit. --no-editable: the runtime stage below copies
-# only .venv, not /build/src, so the venv must be fully self-contained rather than a .pth pointing
-# back at a source tree that will no longer exist.
+# only .venv, not this stage's src/, so the venv must be fully self-contained rather than a .pth
+# pointing back at a source tree that will no longer exist.
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev --no-editable
@@ -50,7 +55,7 @@ RUN groupadd --gid 10001 freeathome2mqtt \
     && useradd --uid 10001 --gid freeathome2mqtt --home-dir /data --create-home freeathome2mqtt
 
 WORKDIR /app
-COPY --from=builder --chown=freeathome2mqtt:freeathome2mqtt /build/.venv /app/.venv
+COPY --from=builder --chown=freeathome2mqtt:freeathome2mqtt /app/.venv /app/.venv
 
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1

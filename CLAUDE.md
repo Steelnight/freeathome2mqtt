@@ -317,15 +317,20 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
   environment — the `Dockerfile` was reviewed carefully by hand (multi-stage layer order,
   `--no-editable`'s purpose, the fixed UID, the healthcheck's documented scope) and matches the
   same `uv`/Python-pinning conventions already verified elsewhere in this project, but manual
-  review is not the same thing as a real build, and it missed a real bug: `ci.yml`'s `container`
-  job, running on GitHub-hosted runners with full registry access, caught it on the first push —
-  `uvloop` has no prebuilt wheel yet for Python 3.14 on these platforms, so `uv sync` fell back to
-  a from-source build that needs a C compiler `python:3.14.7-slim`'s `builder` stage didn't have
-  (`configure: error: no acceptable C compiler found in $PATH`). Fixed by installing
-  `build-essential` in the `builder` stage only — the `runtime` stage copies just `.venv`, so this
-  costs nothing in the shipped image. This is exactly the gap this note originally named: real
+  review is not the same thing as a real build, and it missed two real bugs that `ci.yml`'s
+  `container` job — running on GitHub-hosted runners with full registry access — caught on the
+  first two pushes: (1) `uvloop` has no prebuilt wheel yet for Python 3.14 on these platforms, so
+  `uv sync` fell back to a from-source build that needs a C compiler `python:3.14.7-slim`'s
+  `builder` stage didn't have (`configure: error: no acceptable C compiler found in $PATH`), fixed
+  by installing `build-essential` in the `builder` stage only — the `runtime` stage copies just
+  `.venv`, so this costs nothing in the shipped image; (2) the `builder` stage built the venv at
+  `/build`, but `uv` bakes the venv's absolute path into its generated console-script shebangs at
+  install time, so copying `/build/.venv` into the `runtime` stage's `/app/.venv` left
+  `freeathome2mqtt`'s shebang pointing at a `/build/.venv/bin/python3` that doesn't exist there
+  (`exec: no such file or directory` from the smoke test) — fixed by building at `/app` in both
+  stages so the path never changes. This is exactly the gap this note originally named: real
   container verification needed GitHub's runners, not this session's own judgement, and that is
-  what caught it.
+  what caught both.
 
 Every work package in the plan (WP0–WP12) has landed.
 

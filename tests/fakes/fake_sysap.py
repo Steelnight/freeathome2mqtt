@@ -7,10 +7,12 @@ concurrency -- the same reasoning docs/10 §3.4 applies to the broker.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import copy
 from collections import Counter
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,6 +24,11 @@ DEFAULT_SYSAP_UUID = "00000000-0000-0000-0000-000000000000"
 DEFAULT_SETTINGS_VERSION = "2.6.4"
 DEFAULT_SERIAL_NUMBER = "ABB7005500E1"
 DEFAULT_SYSAP_NAME = "Fake House"
+
+# A single name here (not an inline tuple literal), same reasoning as sysap/rest.py's own
+# _RETRYABLE_CONNECTION_ERRORS: sidesteps Python 3.14's grammar allowing `except A, B:` without
+# parentheses -- a bare comma reads exactly like the dead Python 2 idiom.
+_BASIC_AUTH_DECODE_ERRORS = (binascii.Error, UnicodeDecodeError)
 
 
 @dataclass
@@ -70,8 +77,9 @@ class FakeSysAp:
         self._settings_users: list[dict[str, str]] = [
             {"name": "installer", "jid": "abc123@busch-jaeger.de"}
         ]
+        self._required_username: str | None = None
 
-        self.app = web.Application()
+        self.app = web.Application(middlewares=[self._auth_middleware])
         self.app.router.add_get("/settings.json", self._handle_settings)
         self.app.router.add_get("/fhapi/v1/api/rest/configuration", self._handle_configuration)
         self.app.router.add_get(
@@ -113,6 +121,15 @@ class FakeSysAp:
 
     def set_serial_number(self, serial: str) -> None:
         self._serial_number = serial
+
+    def require_username(self, username: str | None) -> None:
+        """Reject (401) any `/fhapi/v1/*` or WS-upgrade request whose Basic-auth username does
+        not match -- realistic auth simulation for docs/01 §1.1's jid fallback (P-20, F4), on
+        top of `set_error`'s blunter forced-status scripting. `None` (the default) disables the
+        check entirely, matching every other test's behaviour. `/settings.json` is never checked
+        (docs/01 §1.1: unauthenticated by design).
+        """
+        self._required_username = username
 
     # ------------------------------------------------------------------- scripting: HTTP quirks
 
@@ -201,6 +218,29 @@ class FakeSysAp:
         self._ws_hung = False
 
     # ------------------------------------------------------------------------------- handlers
+
+    def _basic_auth_username(self, request: web.Request) -> str | None:
+        header = request.headers.get("Authorization", "")
+        if not header.startswith("Basic "):
+            return None
+        try:
+            decoded = base64.b64decode(header.removeprefix("Basic "), validate=True).decode()
+        except _BASIC_AUTH_DECODE_ERRORS:
+            return None
+        username, _, _ = decoded.partition(":")
+        return username
+
+    @web.middleware
+    async def _auth_middleware(
+        self, request: web.Request, handler: Callable[[web.Request], Awaitable[web.StreamResponse]]
+    ) -> web.StreamResponse:
+        if (
+            self._required_username is not None
+            and request.path != "/settings.json"
+            and self._basic_auth_username(request) != self._required_username
+        ):
+            return web.Response(status=401)
+        return await handler(request)
 
     @contextlib.asynccontextmanager
     async def _track(self, path: str) -> AsyncIterator[None]:

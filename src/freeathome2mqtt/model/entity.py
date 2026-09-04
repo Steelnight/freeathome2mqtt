@@ -88,6 +88,7 @@ class Entity:
     optimistic: bool
     discovery: tuple[tuple[str, bytes], ...]
     transform: str | None = None
+    entity_category: Literal["diagnostic", "config"] | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -44,6 +44,12 @@ async def test_client_id_includes_sysap_serial() -> None:
         assert client.client_id == "freeathome2mqtt_ABB7F500E17A"
 
 
+async def test_explicit_client_id_overrides_the_derived_default() -> None:
+    async with running_fake_broker() as broker:
+        client = _client_for(broker, client_id="my-fixed-id")
+        assert client.client_id == "my-fixed-id"
+
+
 async def test_bridge_subscribes_only_to_command_topics() -> None:
     async with running_fake_broker() as broker:
         client = _client_for(broker)
@@ -131,6 +137,20 @@ async def test_retained_republish_after_reconnect() -> None:
     finally:
         await client.stop()
         await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_force_disable_retain_downgrades_every_retained_publish() -> None:
+    topic = f"{BASE}/kueche_deckenlicht"
+    async with running_fake_broker() as broker:
+        client = _client_for(broker, force_disable_retain=True)
+        task = asyncio.create_task(client.run())
+        try:
+            await _wait_until(lambda: client.reconnect_count >= 1)
+            await client.publish(topic, b'{"state":true}', qos=0, retain=True)
+            assert broker.retained_messages.get(topic) is None
+        finally:
+            await client.stop()
+            await asyncio.wait_for(task, timeout=5.0)
 
 
 async def test_publish_rejects_wildcard_topics() -> None:

@@ -4,6 +4,7 @@ RestClient/WsReader tests can lean on it (docs/10 §2: prefer a fake over mockin
 
 import asyncio
 
+import aiohttp
 import pytest
 from aiohttp import WSMsgType
 
@@ -30,6 +31,43 @@ SAMPLE_CONFIG = {
         }
     },
 }
+
+
+async def test_require_username_rejects_wrong_username_with_401() -> None:
+    fake = FakeSysAp(configuration=SAMPLE_CONFIG)
+    fake.require_username("jid-user")
+    async with running_fake_sysap(fake) as (_fake, client):
+        resp = await client.get(
+            "/fhapi/v1/api/rest/configuration",
+            headers={"Authorization": aiohttp.encode_basic_auth("installer", "secret")},
+        )
+        assert resp.status == 401
+
+
+async def test_require_username_accepts_the_matching_username() -> None:
+    fake = FakeSysAp(configuration=SAMPLE_CONFIG)
+    fake.require_username("jid-user")
+    async with running_fake_sysap(fake) as (_fake, client):
+        resp = await client.get(
+            "/fhapi/v1/api/rest/configuration",
+            headers={"Authorization": aiohttp.encode_basic_auth("jid-user", "secret")},
+        )
+        assert resp.status == 200
+
+
+async def test_require_username_never_gates_the_unauthenticated_settings_endpoint() -> None:
+    fake = FakeSysAp(configuration=SAMPLE_CONFIG)
+    fake.require_username("jid-user")
+    async with running_fake_sysap(fake) as (_fake, client):
+        resp = await client.get("/settings.json")
+        assert resp.status == 200
+
+
+async def test_require_username_none_disables_the_check() -> None:
+    fake = FakeSysAp(configuration=SAMPLE_CONFIG)
+    async with running_fake_sysap(fake) as (_fake, client):
+        resp = await client.get("/fhapi/v1/api/rest/configuration")
+        assert resp.status == 200
 
 
 async def test_configuration_is_served_wrapped_by_sysap_uuid() -> None:

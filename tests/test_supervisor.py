@@ -37,6 +37,7 @@ from freeathome2mqtt.supervisor import (
     restart_on_failure,
 )
 from freeathome2mqtt.sysap.rest import AuthenticationError, ServerOverloadedError
+from freeathome2mqtt.sysap.ws import WsAuthenticationError
 
 PROFILES_DIR = Path(__file__).resolve().parent.parent / "src" / "freeathome2mqtt" / "profiles"
 REGISTRY = load_profile_registry(PROFILES_DIR)
@@ -199,6 +200,52 @@ async def test_no_events_lost_during_startup_window(tmp_path: Path) -> None:
         finally:
             await supervisor.stop()
             await asyncio.wait_for(task, timeout=5.0)
+
+
+# ----------------------------------------------------------------------- jid Basic-auth fallback
+
+
+async def test_jid_fallback_lets_startup_succeed_when_username_is_rejected(tmp_path: Path) -> None:
+    # docs/01 §1.1 / F4: the configured username ("installer") is rejected, but its jid
+    # (FakeSysAp's default "abc123@busch-jaeger.de") is accepted -- startup must still reach
+    # bridge/state: online via the one-time retry.
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        fake.require_username("abc123@busch-jaeger.de")
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done, timeout_seconds=10.0)
+            assert supervisor._rest is not None
+            assert supervisor._ws is not None
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_startup_fails_fatally_when_jid_fallback_also_fails(tmp_path: Path) -> None:
+    # Neither "installer" nor its jid is accepted -- must not hang or retry forever (docs/06 §3).
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        fake.require_username("someone-else-entirely")
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        with pytest.raises(ExceptionGroup) as excinfo:
+            await asyncio.wait_for(supervisor.run(), timeout=5.0)
+        assert any(isinstance(exc, WsAuthenticationError) for exc in excinfo.value.exceptions)
 
 
 # ------------------------------------------------------------------------------------- raw_mode
@@ -689,6 +736,30 @@ async def test_restart_on_failure_does_not_restart_a_clean_return() -> None:
 
     await restart_on_failure("finishes", finishes, metrics=metrics, clock=lambda: 0.0)
     assert calls == 1
+    assert metrics.task_restarts == 0
+
+
+async def test_restart_on_failure_never_restarts_on_ws_authentication_error() -> None:
+    # docs/06 §3: "Auth failure -> Immediately. Do not retry." -- restart_on_failure's generic
+    # backoff-and-restart policy must not apply to this, the same way it already excludes
+    # CancelledError.
+    metrics = Metrics()
+    attempts = 0
+
+    async def bad_credentials() -> None:
+        nonlocal attempts
+        attempts += 1
+        raise WsAuthenticationError("bad credentials")
+
+    with pytest.raises(WsAuthenticationError):
+        await restart_on_failure(
+            "ws_reader",
+            bad_credentials,
+            metrics=metrics,
+            clock=lambda: 0.0,
+            sleep=lambda _delay: asyncio.sleep(0),
+        )
+    assert attempts == 1
     assert metrics.task_restarts == 0
 
 
@@ -2413,6 +2484,32 @@ async def test_dry_run_compiles_a_model_without_touching_mqtt(tmp_path: Path) ->
         assert supervisor._mqtt is None
         assert supervisor._ws is None
         assert supervisor._model is model
+
+
+async def test_dry_run_retries_once_with_jid_when_username_is_rejected(tmp_path: Path) -> None:
+    async with running_fake_sysap(FakeSysAp()) as (fake, http_client):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        fake.require_username("abc123@busch-jaeger.de")
+        supervisor = Supervisor(
+            config=_config(tmp_path, free_port(), http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        model = await supervisor.dry_run()
+        assert len(model.entities) == 1
+
+
+async def test_dry_run_raises_when_jid_fallback_also_fails(tmp_path: Path) -> None:
+    async with running_fake_sysap(FakeSysAp()) as (fake, http_client):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        fake.require_username("someone-else-entirely")
+        supervisor = Supervisor(
+            config=_config(tmp_path, free_port(), http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        with pytest.raises(AuthenticationError):
+            await supervisor.dry_run()
 
 
 async def test_dry_run_picks_up_a_persisted_alias(tmp_path: Path) -> None:

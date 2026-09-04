@@ -7,6 +7,14 @@ what to do with each key (`datapoints`, `devicesAdded`, ...), never this module.
 
 Reconnection never gives up (docs/06 §3): on any disconnect -- a clean close, a connection error,
 or silence past `idle_timeout` -- this loops forever with exponential backoff and full jitter.
+
+The one exception is a `401`/`403` on the WS handshake itself (docs/06 §3's "Auth failure ->
+Immediately. Do not retry.", the WS counterpart of `sysap/rest.py`'s `AuthenticationError`/P-20):
+`run()` raises `WsAuthenticationError` straight away instead of entering the backoff loop, and
+`connect_once()` offers the same check as a one-shot startup probe that never enters the receive
+loop at all -- `supervisor.py` uses it to resolve the docs/01 §1.1 `jid` fallback *before* spawning
+the long-lived, never-gives-up `run()` task, since a bad username there would otherwise hang
+startup forever waiting for a connection that can never succeed.
 """
 
 from __future__ import annotations
@@ -42,8 +50,22 @@ class WsBufferOverflowError(Exception):
     """The buffer (docs/02 §7) overflowed; the caller must restart the load."""
 
 
+class WsAuthenticationError(Exception):
+    """`401`/`403` on the WS handshake -- bad credentials (docs/06 §3; docs/01 §1.1; P-20's WS
+    counterpart). Never retried.
+    """
+
+
 class _WsSilence(Exception):
     """Internal: the current connection went quiet or closed; `run()` reconnects."""
+
+
+_WS_AUTH_FAILURE_STATUSES = (401, 403)
+
+# A single name here (not an inline tuple literal), same reasoning as sysap/rest.py's own
+# _RETRYABLE_CONNECTION_ERRORS: sidesteps Python 3.14's grammar allowing `except A, B:` without
+# parentheses -- a bare comma reads exactly like the dead Python 2 idiom.
+_CONNECTION_FAILURE_ERRORS = (aiohttp.ClientError, OSError)
 
 
 class WsReader:
@@ -108,19 +130,50 @@ class WsReader:
         return frames
 
     async def run(self) -> None:
-        """Connect-and-dispatch forever, reconnecting with backoff+jitter on any disconnect."""
+        """Connect-and-dispatch forever, reconnecting with backoff+jitter on any disconnect --
+        except a `401`/`403` handshake failure (docs/06 §3), which raises immediately instead.
+        """
         self.backoff_attempt = 0
         while not self._stopping:
             try:
                 await self._connect_and_dispatch()
             except _WsSilence as exc:
                 logger.warning("SysAP WebSocket disconnected: %s", exc)
-            except (aiohttp.ClientError, OSError) as exc:
+            except aiohttp.WSServerHandshakeError as exc:
+                if exc.status in _WS_AUTH_FAILURE_STATUSES:
+                    raise WsAuthenticationError(
+                        f"WebSocket handshake failed: HTTP {exc.status}"
+                    ) from exc
+                logger.warning("SysAP WebSocket connection failed: %s", exc)
+            except _CONNECTION_FAILURE_ERRORS as exc:
                 logger.warning("SysAP WebSocket connection failed: %s", exc)
             if self._stopping:
                 return
             self.backoff_attempt += 1
             await self._sleep_backoff(self.backoff_attempt)
+
+    async def connect_once(self) -> None:
+        """One-shot handshake probe for startup (docs/01 §1.1's `jid` fallback): open the WS
+        connection and immediately close it, never entering the receive loop `run()` uses for
+        real traffic. Raises `WsAuthenticationError` on a `401`/`403`; any other failure (the
+        SysAP still booting, a network hiccup, ...) is swallowed here, since retrying those is
+        `run()`'s job once actually spawned, not this one-shot check's.
+        """
+        try:
+            async with self._session.ws_connect(
+                self._url,
+                headers={"Authorization": self._auth_header},
+                ssl=self._ssl,
+                heartbeat=self._heartbeat,
+            ):
+                return
+        except aiohttp.WSServerHandshakeError as exc:
+            if exc.status in _WS_AUTH_FAILURE_STATUSES:
+                raise WsAuthenticationError(
+                    f"WebSocket handshake failed: HTTP {exc.status}"
+                ) from exc
+        except _CONNECTION_FAILURE_ERRORS:
+            pass
 
     async def stop(self) -> None:
         """Stop `run()` after the current connection attempt, closing it if live."""

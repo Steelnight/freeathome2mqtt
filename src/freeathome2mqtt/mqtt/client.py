@@ -54,12 +54,14 @@ class MqttClient:
         port: int = 1883,
         base_topic: str,
         sysap_serial: str,
+        client_id: str | None = None,
         username: str | None = None,
         password: str | None = None,
         tls_context: SSLContext | None = None,
         keepalive: int = 60,
         homeassistant_discovery_topic: str | None = None,
         raw_mode_enabled: bool = False,
+        force_disable_retain: bool = False,
         backoff_initial: float = 1.0,
         backoff_factor: float = 2.0,
         backoff_cap: float = 60.0,
@@ -71,11 +73,20 @@ class MqttClient:
         self._host = host
         self._port = port
         self._base_topic = base_topic
-        self._client_id = f"freeathome2mqtt_{sysap_serial}"
+        # P-43: a fixed client id keyed on the SysAP serial is the default so two bridges never
+        # collide; `client_id` overrides it for deployments that need one they control directly
+        # (e.g. a broker ACL keyed on client id).
+        self._client_id = client_id or f"freeathome2mqtt_{sysap_serial}"
         self._username = username
         self._password = password
         self._tls_context = tls_context
         self._keepalive = keepalive
+        self._force_disable_retain = force_disable_retain
+        if force_disable_retain:
+            logger.warning(
+                "mqtt.force_disable_retain is set -- every retained publish will be downgraded "
+                "to non-retained; late subscribers only see state after the next change"
+            )
         self._on_message = on_message
         self._on_reconnected = on_reconnected
         self._on_disconnected = on_disconnected
@@ -158,6 +169,8 @@ class MqttClient:
         topics.assert_publishable(topic)
         if self._client is None:
             raise MqttClientNotConnectedError(topic)
+        if self._force_disable_retain:
+            retain = False
         await self._client.publish(topic, payload, qos=qos, retain=retain)
         self._last_published[topic] = payload
         if retain:

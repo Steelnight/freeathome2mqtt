@@ -7,7 +7,9 @@ a fatal `TaskDiedTooManyTimesError` after five rapid failures in a row (P-29), w
 `run()` is expected to treat as "exit the process, let the container restart it."
 
 Startup follows docs/02 §7 precisely: probe, connect MQTT (LWT armed before anything risky can
-fail, P-30), open the SysAP WebSocket and buffer *before* fetching the configuration (P-22), fetch,
+fail, P-30), resolve SysAP credentials (docs/01 §1.1's `jid` fallback, tried once on a WS auth
+failure before failing fatally per docs/06 §3 -- `_resolve_sysap_credentials`), open the SysAP
+WebSocket and buffer *before* fetching the configuration (P-22), fetch,
 compile and build Home Assistant discovery (`homeassistant/discovery.py`, WP10), drain the buffer
 over the compiled state, retract any cross-restart-stale discovery topics (P-35), publish discovery
 then state then `bridge/devices` then `bridge/state: online`. Resync (docs/06 §4) reuses the same
@@ -88,8 +90,9 @@ from freeathome2mqtt.sysap.settings_probe import (
     SysApSettings,
     check_version_supported,
     fetch_settings,
+    find_jid,
 )
-from freeathome2mqtt.sysap.ws import WsReader
+from freeathome2mqtt.sysap.ws import WsAuthenticationError, WsReader
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +100,13 @@ _RESTART_BACKOFF_INITIAL = 1.0
 _RESTART_BACKOFF_FACTOR = 2.0
 _RESTART_BACKOFF_CAP = 60.0
 _ESCALATION_THRESHOLD = 5
+
+# docs/06 §3: "Auth failure -> Immediately. Do not retry." A supervised task failing with one of
+# these must propagate straight away, the same way CancelledError already does, rather than being
+# treated as a routine crash to restart with backoff (retrying bad credentials is P-20's own
+# "trips the SysAP's lockout" pitfall, just reached through the supervised-task path instead of
+# RestClient's).
+_NEVER_RESTARTED_EXCEPTIONS = (AuthenticationError, WsAuthenticationError)
 _RAPID_FAILURE_WINDOW_S = 10.0
 
 _RELOAD_DEBOUNCE_S = 2.0
@@ -352,7 +362,9 @@ async def restart_on_failure(
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> None:
-    """Run `factory()` forever, restarting with backoff+jitter on any exception (docs/02 §3.1).
+    """Run `factory()` forever, restarting with backoff+jitter on any exception (docs/02 §3.1) --
+    except `asyncio.CancelledError` and `_NEVER_RESTARTED_EXCEPTIONS` (docs/06 §3's auth-failure
+    rule), both of which propagate immediately instead.
 
     A task that returns normally is done, not failed -- only the exception path restarts. Escalates
     by raising `TaskDiedTooManyTimesError` once `_ESCALATION_THRESHOLD` failures have each started
@@ -369,6 +381,8 @@ async def restart_on_failure(
             await factory()
             return
         except asyncio.CancelledError:
+            raise
+        except _NEVER_RESTARTED_EXCEPTIONS:
             raise
         except Exception:
             logger.exception("supervised task %r failed", name)
@@ -447,21 +461,29 @@ class SupervisorConfig:
     sysap_password: str
     sysap_ssl: ssl_module.SSLContext | bool = True
     sysap_max_inflight: int = 4
+    sysap_request_timeout_s: float = 10.0
     mqtt_host: str = "localhost"
     mqtt_port: int = 1883
+    mqtt_client_id: str | None = None
     mqtt_username: str | None = None
     mqtt_password: str | None = None
     mqtt_tls: ssl_module.SSLContext | None = None
     mqtt_keepalive: int = 60
+    mqtt_qos_state: int = 0
+    mqtt_qos_discovery: int = 1
+    mqtt_force_disable_retain: bool = False
     base_topic: str = "freeathome2mqtt"
     compile_options: CompileOptions = field(default_factory=CompileOptions)
     data_dir: Path = field(default_factory=lambda: Path("/data"))
     coalesce_ms: int = 20
     publish_last_changed: bool = True
     command_debounce_s: float = 0.05
+    default_optimistic: bool = True
     reconcile_delay_s: float = 3.0
     get_rate_limit_s: float = 5.0
     grace_seconds: float = 10.0
+    availability_enabled: bool = True
+    availability_per_device: bool = True
     config_refresh_interval_s: float = 300.0
     reload_debounce_s: float = _RELOAD_DEBOUNCE_S
     reload_min_interval_s: float = _RELOAD_MIN_INTERVAL_S
@@ -560,17 +582,24 @@ class Supervisor:
         check_version_supported(settings.version)
         self._sysap_settings = settings
 
-        rest = RestClient(
-            base_url=self._config.sysap_base_url,
-            username=self._config.sysap_username,
-            password=self._config.sysap_password,
-            session=self._http_session,
-            ssl=self._config.sysap_ssl,
-            max_inflight=self._config.sysap_max_inflight,
-        )
-        self._rest = rest
+        self._rest = self._build_rest_client()
+        try:
+            config = await self._fetch_configuration_with_retry()
+        except AuthenticationError:
+            # docs/01 §1.1 / F4: no WsReader exists here to probe cheaply (dry_run never
+            # constructs one, by design), and this is a one-shot diagnostic command rather than
+            # a hot startup path, so retrying the full configuration fetch once with the jid is
+            # an acceptable cost -- unlike `_resolve_sysap_credentials`'s WS-probe-first approach.
+            jid = find_jid(settings.users, self._config.sysap_username)
+            if jid is None:
+                raise
+            logger.info(
+                "SysAP rejected username %r; retrying once with the jid fallback (docs/01 §1.1)",
+                self._config.sysap_username,
+            )
+            self._rest = self._build_rest_client(username=jid)
+            config = await self._fetch_configuration_with_retry()
 
-        config = await self._fetch_configuration_with_retry()
         model = self._compile_and_build_discovery(config)
         self._model = model
         return model
@@ -614,10 +643,8 @@ class Supervisor:
         await _wait_until(lambda: mqtt.reconnect_count >= 1)
         self._start_metrics_server_if_enabled()
 
-        rest = self._build_rest_client()
+        rest, ws = await self._resolve_sysap_credentials(settings)
         self._rest = rest
-
-        ws = self._build_ws_reader()
         self._ws = ws
         ws.start_buffering()  # armed before the very first connect too (docs/02 §7)
         self._spawn_supervised("ws_reader", ws.run)
@@ -659,6 +686,7 @@ class Supervisor:
             port=self._config.mqtt_port,
             base_topic=self._config.base_topic,
             sysap_serial=settings.serial_number,
+            client_id=self._config.mqtt_client_id,
             username=self._config.mqtt_username,
             password=self._config.mqtt_password,
             tls_context=self._config.mqtt_tls,
@@ -669,6 +697,7 @@ class Supervisor:
                 else None
             ),
             raw_mode_enabled=self._config.raw_mode is not False,
+            force_disable_retain=self._config.mqtt_force_disable_retain,
             backoff_initial=self._config.link_backoff_initial,
             backoff_factor=self._config.link_backoff_factor,
             backoff_cap=self._config.link_backoff_cap,
@@ -690,25 +719,60 @@ class Supervisor:
             mqtt=mqtt, base_topic=self._config.base_topic, grace_seconds=self._config.grace_seconds
         )
         self._availability = availability
-        device_availability = DeviceAvailabilityPublisher(mqtt=mqtt)
+        device_availability = DeviceAvailabilityPublisher(
+            mqtt=mqtt,
+            enabled=self._config.availability_enabled and self._config.availability_per_device,
+        )
         self._device_availability = device_availability
-        self._discovery_publisher = DiscoveryPublisher(mqtt=mqtt, store=self._discovery_store)
+        self._discovery_publisher = DiscoveryPublisher(
+            mqtt=mqtt, store=self._discovery_store, qos=self._config.mqtt_qos_discovery
+        )
         return availability, device_availability
 
-    def _build_rest_client(self) -> RestClient:
+    async def _resolve_sysap_credentials(
+        self, settings: SysApSettings
+    ) -> tuple[RestClient, WsReader]:
+        """docs/01 §1.1 / F4: try the configured username first; on a WS handshake auth failure,
+        retry once with the `jid` looked up from `settings.json`'s `users[]` before letting the
+        bridge fail fatally (docs/06 §3: "Auth failure -> Immediately. Do not retry."). Probed
+        over WS (`WsReader.connect_once`), not a REST config fetch, so this costs one cheap
+        handshake rather than a second full configuration fetch (ADR-007) -- and must happen
+        before `ws_reader` is spawned as a supervised, never-gives-up task (docs/06 §3's SysAP-
+        booting case): a bad username there would otherwise hang startup forever waiting for a
+        connection that can never succeed.
+        """
+        rest = self._build_rest_client()
+        ws = self._build_ws_reader()
+        try:
+            await ws.connect_once()
+        except WsAuthenticationError:
+            jid = find_jid(settings.users, self._config.sysap_username)
+            if jid is None:
+                raise
+            logger.info(
+                "SysAP rejected username %r; retrying once with the jid fallback (docs/01 §1.1)",
+                self._config.sysap_username,
+            )
+            rest = self._build_rest_client(username=jid)
+            ws = self._build_ws_reader(username=jid)
+            await ws.connect_once()  # a second failure propagates fatally, per docs/06 §3
+        return rest, ws
+
+    def _build_rest_client(self, *, username: str | None = None) -> RestClient:
         return RestClient(
             base_url=self._config.sysap_base_url,
-            username=self._config.sysap_username,
+            username=username if username is not None else self._config.sysap_username,
             password=self._config.sysap_password,
             session=self._http_session,
             ssl=self._config.sysap_ssl,
             max_inflight=self._config.sysap_max_inflight,
+            request_timeout=self._config.sysap_request_timeout_s,
         )
 
-    def _build_ws_reader(self) -> WsReader:
+    def _build_ws_reader(self, *, username: str | None = None) -> WsReader:
         return WsReader(
             url=f"{self._config.sysap_base_url}/fhapi/v1/api/ws",
-            username=self._config.sysap_username,
+            username=username if username is not None else self._config.sysap_username,
             password=self._config.sysap_password,
             session=self._http_session,
             ssl=self._config.sysap_ssl,
@@ -937,6 +1001,7 @@ class Supervisor:
             mqtt=mqtt,
             coalesce_ms=self._config.coalesce_ms,
             publish_last_changed=self._config.publish_last_changed,
+            qos_state=self._config.mqtt_qos_state,
         )
         self._rate_limiter = rate_limiter
         self._reconciler = reconciler
@@ -951,6 +1016,7 @@ class Supervisor:
             rate_limiter=rate_limiter,
             base_topic=self._config.base_topic,
             debounce_s=self._config.command_debounce_s,
+            default_optimistic=self._config.default_optimistic,
             optimistic_overrides=self._entity_optimistic_overrides(model),
             debounce_overrides=self._entity_debounce_overrides(model),
         )

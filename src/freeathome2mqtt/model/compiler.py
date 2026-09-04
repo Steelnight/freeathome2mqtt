@@ -594,6 +594,16 @@ def _build_entity(
     has_optimistic_command = any(
         cmd.optimistic is not None for cmd in compiled.profile.commands.values()
     )
+    # An attribute's `entity_category` (docs/03 §3.2) is only unambiguously the whole entity's
+    # HA `entity_category` when the entity has exactly one attribute -- HA's entity_category is
+    # per-discovery-payload, and this codebase publishes one payload per entity (ADR-009), not
+    # per attribute. A multi-attribute entity (e.g. room_temperature_controller, dimming_actuator)
+    # may mark some of its attributes diagnostic without that making the whole entity diagnostic.
+    entity_category = (
+        next(iter(compiled.profile.attributes.values())).entity_category
+        if len(compiled.profile.attributes) == 1
+        else None
+    )
 
     entity = Entity(
         idx=idx,
@@ -614,6 +624,7 @@ def _build_entity(
         optimistic=has_optimistic_command,
         discovery=(),  # WP10 renders real Home Assistant discovery payloads; empty until then.
         transform=compiled.profile.transform,
+        entity_category=entity_category,
     )
     return entity, attrs.bindings, egress, attrs.initial_values
 

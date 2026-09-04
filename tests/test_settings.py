@@ -383,6 +383,34 @@ async def test_translation_mqtt_ca_produces_an_ssl_context(tmp_path: Path) -> No
     assert isinstance(config.mqtt_tls, ssl.SSLContext)
 
 
+async def test_translation_mqtt_reject_unauthorized_false_disables_verification(
+    tmp_path: Path,
+) -> None:
+    ca_path = tmp_path / "mqtt-ca.pem"
+    ca_path.write_text(_TEST_CA_PEM)
+    config_yaml = (
+        MINIMAL_CONFIG
+        + f"\nmqtt:\n  server: mqtt://h:1883\n  ca: {ca_path}\n  reject_unauthorized: false\n"
+    )
+    path = _write(tmp_path, config_yaml)
+    settings = load_settings(path, environ={})
+    config = await settings_to_supervisor_config(settings)
+    assert isinstance(config.mqtt_tls, ssl.SSLContext)
+    assert config.mqtt_tls.verify_mode == ssl.CERT_NONE
+    assert config.mqtt_tls.check_hostname is False
+
+
+async def test_translation_mqtt_reject_unauthorized_true_keeps_verification(tmp_path: Path) -> None:
+    ca_path = tmp_path / "mqtt-ca.pem"
+    ca_path.write_text(_TEST_CA_PEM)
+    config_yaml = MINIMAL_CONFIG + f"\nmqtt:\n  server: mqtt://h:1883\n  ca: {ca_path}\n"
+    path = _write(tmp_path, config_yaml)
+    settings = load_settings(path, environ={})
+    config = await settings_to_supervisor_config(settings)
+    assert isinstance(config.mqtt_tls, ssl.SSLContext)
+    assert config.mqtt_tls.verify_mode == ssl.CERT_REQUIRED
+
+
 async def test_translation_maps_homeassistant_and_mqtt_packet_size_fields(tmp_path: Path) -> None:
     config_yaml = (
         MINIMAL_CONFIG + "\nhomeassistant:\n"
@@ -411,6 +439,63 @@ async def test_translation_homeassistant_defaults(tmp_path: Path) -> None:
     assert config.homeassistant_status_topic == "homeassistant/status"
     assert config.homeassistant_republish_delay_s == pytest.approx(5.0)
     assert config.mqtt_maximum_packet_size == 1048576
+
+
+async def test_translation_maps_mqtt_client_id(tmp_path: Path) -> None:
+    config_yaml = (
+        MINIMAL_CONFIG + "\nmqtt:\n  server: mqtt://192.168.1.10:1883\n  client_id: fixed\n"
+    )
+    path = _write(tmp_path, config_yaml)
+    settings = load_settings(path, environ={})
+    config = await settings_to_supervisor_config(settings)
+    assert config.mqtt_client_id == "fixed"
+
+
+async def test_translation_mqtt_client_id_defaults_to_none(tmp_path: Path) -> None:
+    path = _write(tmp_path, MINIMAL_CONFIG)
+    settings = load_settings(path, environ={})
+    config = await settings_to_supervisor_config(settings)
+    assert config.mqtt_client_id is None
+
+
+async def test_translation_maps_mqtt_qos_and_retain_fields(tmp_path: Path) -> None:
+    config_yaml = (
+        MINIMAL_CONFIG + "\nmqtt:\n  server: mqtt://192.168.1.10:1883\n"
+        "  qos_state: 1\n  qos_discovery: 0\n  force_disable_retain: true\n"
+    )
+    path = _write(tmp_path, config_yaml)
+    settings = load_settings(path, environ={})
+    config = await settings_to_supervisor_config(settings)
+    assert config.mqtt_qos_state == 1
+    assert config.mqtt_qos_discovery == 0
+    assert config.mqtt_force_disable_retain is True
+
+
+async def test_translation_maps_sysap_request_timeout(tmp_path: Path) -> None:
+    config_yaml = MINIMAL_CONFIG.replace(
+        "password: secret\n", "password: secret\n  request_timeout: 25\n"
+    )
+    path = _write(tmp_path, config_yaml)
+    settings = load_settings(path, environ={})
+    config = await settings_to_supervisor_config(settings)
+    assert config.sysap_request_timeout_s == pytest.approx(25.0)
+
+
+async def test_translation_maps_performance_optimistic_default(tmp_path: Path) -> None:
+    config_yaml = MINIMAL_CONFIG + "\nperformance:\n  optimistic: false\n"
+    path = _write(tmp_path, config_yaml)
+    settings = load_settings(path, environ={})
+    config = await settings_to_supervisor_config(settings)
+    assert config.default_optimistic is False
+
+
+async def test_translation_maps_availability_enabled_and_per_device(tmp_path: Path) -> None:
+    config_yaml = MINIMAL_CONFIG + "\navailability:\n  enabled: false\n  per_device: false\n"
+    path = _write(tmp_path, config_yaml)
+    settings = load_settings(path, environ={})
+    config = await settings_to_supervisor_config(settings)
+    assert config.availability_enabled is False
+    assert config.availability_per_device is False
 
 
 @pytest.mark.parametrize(

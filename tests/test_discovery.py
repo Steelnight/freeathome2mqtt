@@ -203,6 +203,52 @@ def test_device_class_from_the_profile_is_included_in_the_payload() -> None:
     assert body["device_class"] == "window"
 
 
+def test_entity_category_from_the_sole_attribute_is_included_in_the_payload() -> None:
+    # window_door_sensor has exactly one attribute (`state`), itself marked
+    # `entity_category: diagnostic` in profiles/sensors.yaml -- the unambiguous case where a
+    # per-attribute category is also unambiguously the whole entity's category.
+    config = _window_door_config()
+    model = build_model_discovery(_compiled(config), REGISTRY, config, DiscoveryOptions())
+    body = orjson.loads(model.discovery[0][1])
+    assert body["entity_category"] == "diagnostic"
+
+
+def test_entity_category_is_absent_for_a_multi_attribute_entity() -> None:
+    # dimming_actuator's `forced_position` attribute declares entity_category: diagnostic, but
+    # it is one of three attributes (state, brightness, forced_position) sharing one `light`
+    # discovery payload -- HA's entity_category is whole-entity, so marking the whole light
+    # diagnostic would hide it from the dashboard. Only the single-attribute case is wired.
+    config = {
+        "floorplan": {"floors": {"01": {"name": "GF", "rooms": {"0C": {"name": "Room"}}}}},
+        "devices": {
+            SERIAL: {
+                "displayName": "Dimmer",
+                "interface": "TP",
+                "floor": "01",
+                "room": "0C",
+                "channels": {
+                    "ch0000": {
+                        "displayName": "Dimmer",
+                        "functionID": "12",  # FID_DIMMING_ACTUATOR
+                        "outputs": {
+                            "odp0000": {"pairingID": 256, "value": "1"},  # AL_INFO_ON_OFF
+                            "odp0001": {  # AL_INFO_ACTUAL_DIMMING_VALUE
+                                "pairingID": 272,
+                                "value": "50",
+                            },
+                        },
+                        "floor": "01",
+                        "room": "0C",
+                    }
+                },
+            }
+        },
+    }
+    model = build_model_discovery(_compiled(config), REGISTRY, config, DiscoveryOptions())
+    body = orjson.loads(model.discovery[0][1])
+    assert "entity_category" not in body
+
+
 def test_unknown_homeassistant_component_raises() -> None:
     bad_profile = parse_profile(
         {
@@ -265,6 +311,26 @@ async def test_publish_changed_publishes_a_new_topic_once(tmp_path: Path) -> Non
             # A second publish_changed with the SAME model must publish nothing.
             await publisher.publish_changed(model)
             assert store.hashes[topic] is not None
+        finally:
+            await client.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_publish_changed_uses_the_configured_qos(tmp_path: Path) -> None:
+    async with running_fake_broker() as broker:
+        client = _client(broker)
+        task = asyncio.create_task(client.run())
+        try:
+            await _wait_until(lambda: client.reconnect_count >= 1)
+            store = DiscoveryStore(tmp_path / "discovery.json")
+            publisher = DiscoveryPublisher(mqtt=client, store=store, qos=0)
+            config = _switch_config()
+            model = build_model_discovery(_compiled(config), REGISTRY, config, DiscoveryOptions())
+            topic = model.discovery[0][0]
+
+            await publisher.publish_changed(model)
+            await _wait_until(lambda: broker.retained_messages.get(topic) is not None)
+            assert broker.retained_messages[topic].qos == 0
         finally:
             await client.stop()
             await asyncio.wait_for(task, timeout=5.0)

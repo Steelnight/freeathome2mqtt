@@ -45,7 +45,7 @@ from freeathome2mqtt.supervisor import Supervisor, TaskDiedTooManyTimesError
 from freeathome2mqtt.sysap.mdns import discover_sysaps
 from freeathome2mqtt.sysap.rest import RestClient, SysApError
 from freeathome2mqtt.sysap.settings_probe import check_version_supported, fetch_settings
-from freeathome2mqtt.sysap.ws import WsReader
+from freeathome2mqtt.sysap.ws import WsAuthenticationError, WsReader
 from freeathome2mqtt.tools.capture import capture
 
 if TYPE_CHECKING:
@@ -138,6 +138,7 @@ async def _run_capture(settings: Settings, output_path: Path) -> int:
             session=session,
             ssl=ssl_context,
             max_inflight=settings.sysap.max_inflight,
+            request_timeout=settings.sysap.request_timeout,
         )
 
         # `pseudonymise_with_map`/`pseudonymise_ws_frame` both expect the raw per-SysAP-UUID
@@ -185,14 +186,24 @@ async def _run_supervisor(supervisor: Supervisor) -> int:
     for sig in _STOP_SIGNALS:
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, lambda: asyncio.ensure_future(supervisor.stop()))
-    died_too_many_times = False
+    fatal = False
     try:
         await supervisor.run()
     except* TaskDiedTooManyTimesError as eg:
-        died_too_many_times = True
+        fatal = True
         for exc in eg.exceptions:
             logger.error("supervisor task failed permanently: %s", exc)
-    return 1 if died_too_many_times or supervisor.restart_requested else 0
+    except* WsAuthenticationError as auth_eg:
+        # docs/06 §3 / docs/01 §1.1: bad credentials, jid fallback already tried and failed too
+        # (or the configured username has no jid to fall back to) -- fail loudly, never retry.
+        fatal = True
+        for auth_exc in auth_eg.exceptions:
+            logger.error(
+                "SysAP rejected the configured credentials (jid fallback also failed): %s. "
+                "Check sysap.username/sysap.password.",
+                auth_exc,
+            )
+    return 1 if fatal or supervisor.restart_requested else 0
 
 
 async def _async_main(args: argparse.Namespace) -> int:

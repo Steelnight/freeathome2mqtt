@@ -161,6 +161,20 @@ async def test_get_configuration_resolves_sysap_uuid() -> None:
         assert config["devices"][SERIAL]["displayName"] == "Ceiling Light"
 
 
+async def test_request_timeout_raises_when_the_sysap_is_slower_than_configured() -> None:
+    # docs/07 §2 sysap.request_timeout: a request that hangs longer than this must not block
+    # the bridge forever -- it should time out and (like any other connection-level error) be
+    # retried, then finally raise once max_attempts is exhausted.
+    fake = FakeSysAp(configuration=SAMPLE_CONFIG)
+    fake.set_latency(200)  # ms -- much slower than the request_timeout below
+    async with running_fake_sysap(fake) as (_fake, client):
+        rest = _client_for(
+            client, request_timeout=0.02, max_attempts=1, backoff_initial=0.01, backoff_cap=0.02
+        )
+        with pytest.raises(TimeoutError):
+            await rest.get_configuration()
+
+
 async def test_non_default_sysap_uuid_is_resolved_from_configuration() -> None:
     custom_uuid = "de305d54-75b4-431b-adb2-eb6b9e546014"
     fake = FakeSysAp(sysap_uuid=custom_uuid, configuration=SAMPLE_CONFIG)

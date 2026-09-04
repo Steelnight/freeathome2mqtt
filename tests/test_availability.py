@@ -256,6 +256,24 @@ async def test_device_availability_publisher_publishes_only_entities_with_availa
             await asyncio.wait_for(task, timeout=5.0)
 
 
+async def test_device_availability_publisher_disabled_publishes_nothing() -> None:
+    # availability.enabled: false / availability.per_device: false (docs/07 §2) -- the per-device
+    # topic is opt-in (docs/06 §5.2); disabled must mean genuinely no publishes, not just no
+    # availability_topic on the entity (that's a separate, profile-driven gate).
+    async with running_fake_broker() as broker:
+        client, task = await _connected_client(broker)
+        try:
+            publisher = DeviceAvailabilityPublisher(mqtt=client, enabled=False)
+            entities = [_entity(0, availability=True)]
+            await publisher.publish(entities, {SERIAL: {"unresponsive": True}})
+            await asyncio.sleep(0.05)
+
+            assert client.last_published(f"{BASE}/test0/availability") is None
+        finally:
+            await client.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
 async def test_device_availability_publisher_is_change_only() -> None:
     async with running_fake_broker() as broker:
         client, task = await _connected_client(broker)

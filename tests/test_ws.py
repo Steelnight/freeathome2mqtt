@@ -7,7 +7,7 @@ import asyncio
 import pytest
 
 from fakes.fake_sysap import FakeSysAp, running_fake_sysap
-from freeathome2mqtt.sysap.ws import WsBufferOverflowError, WsReader
+from freeathome2mqtt.sysap.ws import WsAuthenticationError, WsBufferOverflowError, WsReader
 
 SERIAL = "ABB7F500E17A"
 
@@ -329,6 +329,69 @@ async def test_backoff_attempt_resets_after_a_successful_reconnect() -> None:
         finally:
             await reader.stop()
             await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_run_raises_ws_authentication_error_immediately_on_401() -> None:
+    # docs/06 §3: "Auth failure (401/403) -> Immediately. Do not retry." -- unlike an ordinary
+    # connection failure, this must not enter the backoff/retry loop at all.
+    fake = FakeSysAp()
+    fake.require_username("jid-user")
+    async with running_fake_sysap(fake) as (_fake, client):
+        reader = _reader_for(client, backoff_initial=0.01, backoff_cap=0.02)
+        with pytest.raises(WsAuthenticationError):
+            await asyncio.wait_for(reader.run(), timeout=5.0)
+        assert reader.reconnect_count == 0
+        assert reader.backoff_attempt == 0
+
+
+async def test_run_still_retries_ordinary_connection_failures_after_a_401_fix() -> None:
+    # Confirms the 401 fast-path doesn't disturb the ordinary retry-forever behaviour for
+    # ordinary failures once credentials are no longer the problem.
+    async with running_fake_sysap(FakeSysAp()) as (_fake, client):
+        reader = WsReader(
+            url="http://127.0.0.1:1/fhapi/v1/api/ws",
+            username="installer",
+            password="secret",
+            session=client.session,
+            backoff_initial=0.01,
+            backoff_cap=0.02,
+        )
+        task = asyncio.create_task(reader.run())
+        try:
+            await _wait_until(lambda: reader.backoff_attempt >= 2, timeout_seconds=5.0)
+            assert reader.reconnect_count == 0
+        finally:
+            await reader.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_connect_once_succeeds_silently_with_valid_credentials() -> None:
+    async with running_fake_sysap(FakeSysAp()) as (_fake, client):
+        reader = _reader_for(client)
+        await reader.connect_once()  # must not raise
+        assert reader.reconnect_count == 0  # never entered the receive loop
+
+
+async def test_connect_once_raises_ws_authentication_error_on_401() -> None:
+    fake = FakeSysAp()
+    fake.require_username("jid-user")
+    async with running_fake_sysap(fake) as (_fake, client):
+        reader = _reader_for(client)
+        with pytest.raises(WsAuthenticationError):
+            await reader.connect_once()
+
+
+async def test_connect_once_swallows_non_auth_connection_failures() -> None:
+    # A booting SysAP that isn't reachable yet is `run()`'s retry-forever job, not this one-shot
+    # startup probe's -- it must not raise for anything other than a 401/403.
+    async with running_fake_sysap(FakeSysAp()) as (_fake, client):
+        reader = WsReader(
+            url="http://127.0.0.1:1/fhapi/v1/api/ws",
+            username="installer",
+            password="secret",
+            session=client.session,
+        )
+        await reader.connect_once()  # must not raise
 
 
 async def test_stop_ends_the_run_loop() -> None:

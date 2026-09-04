@@ -41,6 +41,7 @@ class Publisher:
         mqtt: MqttClient,
         coalesce_ms: int = 20,
         publish_last_changed: bool = True,
+        qos_state: int = 0,
         clock: Callable[[], datetime] = _utcnow,
     ) -> None:
         self._entities = entities
@@ -48,6 +49,7 @@ class Publisher:
         self._mqtt = mqtt
         self._coalesce_ms = coalesce_ms
         self._publish_last_changed = publish_last_changed
+        self._qos_state = qos_state
         self._clock = clock
         self.publish_count = 0
 
@@ -90,6 +92,6 @@ class Publisher:
         for idx in sorted(self._state.dirty):
             entity = self._entities[idx]
             payload = orjson.dumps(self.build_payload(idx))
-            await self._mqtt.publish(entity.state_topic, payload, qos=0, retain=True)
+            await self._mqtt.publish(entity.state_topic, payload, qos=self._qos_state, retain=True)
             self._state.dirty.discard(idx)
             self.publish_count += 1

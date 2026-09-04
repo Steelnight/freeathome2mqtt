@@ -132,6 +132,8 @@ def _build_entity_discovery(
     device_class = profile.homeassistant.get("device_class")
     if device_class is not None:
         payload["device_class"] = device_class
+    if entity.entity_category is not None:
+        payload["entity_category"] = entity.entity_category
     payload.update(_common_envelope(ctx))
     if override:
         payload.update(override)  # entity/options {"homeassistant": {...}}, docs/04 §5
@@ -191,9 +193,10 @@ class DiscoveryPublisher:
     `BridgeAvailability`/`CommandDispatcher` already use (CLAUDE.md rule 6).
     """
 
-    def __init__(self, *, mqtt: MqttClient, store: DiscoveryStore) -> None:
+    def __init__(self, *, mqtt: MqttClient, store: DiscoveryStore, qos: int = 1) -> None:
         self._mqtt = mqtt
         self._store = store
+        self._qos = qos
 
     async def publish_changed(self, model: Model) -> None:
         """Publish only topics whose payload differs from what `store` last recorded -- a no-op
@@ -203,7 +206,7 @@ class DiscoveryPublisher:
         for topic, payload in model.discovery:
             if not self._store.is_changed(topic, payload):
                 continue
-            await self._mqtt.publish(topic, payload, qos=1, retain=True)
+            await self._mqtt.publish(topic, payload, qos=self._qos, retain=True)
             self._store.mark(topic, payload)
             changed = True
         if changed:
@@ -215,7 +218,7 @@ class DiscoveryPublisher:
         not the changed-only path `publish_changed` uses for ordinary resyncs.
         """
         for topic, payload in model.discovery:
-            await self._mqtt.publish(topic, payload, qos=1, retain=True)
+            await self._mqtt.publish(topic, payload, qos=self._qos, retain=True)
             self._store.mark(topic, payload)
         if model.discovery:
             await self._store.save()
@@ -224,7 +227,7 @@ class DiscoveryPublisher:
         """Publish an empty retained payload for each topic and forget it (P-35)."""
         removed = False
         for topic in topics:
-            await self._mqtt.publish(topic, b"", qos=1, retain=True)
+            await self._mqtt.publish(topic, b"", qos=self._qos, retain=True)
             self._store.remove(topic)
             removed = True
         if removed:

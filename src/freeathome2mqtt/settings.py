@@ -12,14 +12,22 @@ docstring promises: a validated `Settings` becomes a `SupervisorConfig`, never t
 see `mqtt/client.py`'s docstring), `homeassistant.legacy_entity_attributes` (its exact shape is not
 specified anywhere in docs/04 §6, so it stays accepted-and-validated rather than guessed at),
 `entities.exclude`/`include` (accepted and validated, not yet enforced by `model.compiler`),
-adaptive coalescing, `advanced.cache_config`. Each is a named, deliberate gap, not a silent drop --
-the schema still accepts and validates them so a `config.yaml` written against the full docs/07
-reference loads cleanly today and picks up real behaviour as later work packages land.
+adaptive coalescing, `advanced.cache_config`, and `availability.stale_after` (docs/06 §5.3:
+counting entities that haven't changed in this long needs a last-changed timestamp per entity --
+new state, not just wiring -- so it stays accepted-and-validated rather than half-built into
+`bridge/info`). Each is a named, deliberate gap, not a silent drop -- the schema still accepts and
+validates them so a `config.yaml` written against the full docs/07 reference loads cleanly today
+and picks up real behaviour as later work packages land.
 `homeassistant.enabled`/`discovery_topic`/`status_topic`/`republish_delay` and
 `mqtt.maximum_packet_size` are wired as of WP10; `advanced.raw_mode` as of WP11 (`bus/raw.py`);
 per-entity `optimistic`/`debounce_ms`/`homeassistant` overrides (via `entity/options`, not a
 `config.yaml` knob) as of the WP10 gap-closing round; `advanced.metrics.enabled`/`port` as of WP12
-(`metrics_server.py`).
+(`metrics_server.py`); `mqtt.client_id`/`qos_state`/`qos_discovery`/`force_disable_retain`/
+`reject_unauthorized`, `sysap.request_timeout`, `performance.optimistic` (as the installation-wide
+fallback beneath any per-entity `entity/options` override) and `availability.enabled`/`per_device`
+(gating only the per-device `<entity>/availability` signal -- `BridgeAvailability`'s `bridge/state`
+stays unconditional, per ADR-008's "mandatory core plumbing, not a feature") as of a later
+YAGNI-cleanup pass: each was previously validated but silently inert, found and closed together.
 """
 
 from __future__ import annotations
@@ -404,8 +412,11 @@ async def _build_mqtt_tls(mqtt: MqttSection) -> ssl_module.SSLContext | None:
     """
     if mqtt.ca is None:
         return None
-    context = await build_ssl_context("ca_file", ca_file=mqtt.ca)
-    return cast(ssl_module.SSLContext, context)
+    context = cast(ssl_module.SSLContext, await build_ssl_context("ca_file", ca_file=mqtt.ca))
+    if not mqtt.reject_unauthorized:
+        context.check_hostname = False
+        context.verify_mode = ssl_module.CERT_NONE
+    return context
 
 
 async def settings_to_supervisor_config(settings: Settings) -> SupervisorConfig:
@@ -423,12 +434,17 @@ async def settings_to_supervisor_config(settings: Settings) -> SupervisorConfig:
         sysap_password=settings.sysap.password,
         sysap_ssl=sysap_ssl,
         sysap_max_inflight=settings.sysap.max_inflight,
+        sysap_request_timeout_s=settings.sysap.request_timeout,
         mqtt_host=mqtt_host,
         mqtt_port=mqtt_port,
         mqtt_username=settings.mqtt.user,
         mqtt_password=settings.mqtt.password,
         mqtt_tls=mqtt_tls,
+        mqtt_client_id=settings.mqtt.client_id,
         mqtt_keepalive=settings.mqtt.keepalive,
+        mqtt_qos_state=settings.mqtt.qos_state,
+        mqtt_qos_discovery=settings.mqtt.qos_discovery,
+        mqtt_force_disable_retain=settings.mqtt.force_disable_retain,
         base_topic=settings.mqtt.base_topic,
         compile_options=CompileOptions(
             topic_prefix=settings.mqtt.base_topic,
@@ -441,9 +457,12 @@ async def settings_to_supervisor_config(settings: Settings) -> SupervisorConfig:
         coalesce_ms=settings.performance.coalesce_ms,
         publish_last_changed=settings.entities.publish_last_changed,
         command_debounce_s=settings.performance.command_debounce_ms / 1000,
+        default_optimistic=settings.performance.optimistic,
         reconcile_delay_s=settings.performance.reconcile_after_ms / 1000,
         get_rate_limit_s=settings.performance.get_rate_limit_s,
         grace_seconds=settings.availability.grace_seconds,
+        availability_enabled=settings.availability.enabled,
+        availability_per_device=settings.availability.per_device,
         config_refresh_interval_s=settings.sysap.config_refresh_interval,
         link_backoff_initial=settings.sysap.reconnect.initial,
         link_backoff_factor=settings.sysap.reconnect.factor,

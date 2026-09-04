@@ -146,13 +146,21 @@ def device_availability(device: Device) -> DeviceAvailability:
 
 
 class DeviceAvailabilityPublisher:
-    """Publishes per-entity availability (docs/06 §5.2), retained QoS 1, only on change."""
+    """Publishes per-entity availability (docs/06 §5.2), retained QoS 1, only on change.
 
-    def __init__(self, *, mqtt: MqttClient) -> None:
+    Opt-in via `availability.enabled`/`availability.per_device` (both default `true`) -- `enabled`
+    here gates only this per-device signal, not `BridgeAvailability`'s `bridge/state` (ADR-008
+    treats that as mandatory core plumbing, never optional).
+    """
+
+    def __init__(self, *, mqtt: MqttClient, enabled: bool = True) -> None:
         self._mqtt = mqtt
+        self._enabled = enabled
         self._last_published: dict[str, bytes] = {}
 
     async def publish(self, entities: Sequence[Entity], devices: Mapping[str, Device]) -> None:
+        if not self._enabled:
+            return
         for entity in entities:
             if entity.availability_topic is None:
                 continue

@@ -68,6 +68,7 @@ class CommandDispatcher:
         rate_limiter: RateLimiter,
         base_topic: str,
         debounce_s: float = _DEFAULT_DEBOUNCE_S,
+        default_optimistic: bool = True,
         optimistic_overrides: Mapping[int, bool] | None = None,
         debounce_overrides: Mapping[int, float] | None = None,
     ) -> None:
@@ -81,6 +82,7 @@ class CommandDispatcher:
         self._rate_limiter = rate_limiter
         self._base_topic = base_topic
         self._debounce_s = debounce_s
+        self._default_optimistic = default_optimistic
         # docs/04 §5 `entity/options`: per-entity overrides of the installation-wide defaults
         # above, keyed by entity idx (rebuilt from entities.json on every resync, docs/07 §4.1).
         self._optimistic_overrides = optimistic_overrides or {}
@@ -271,7 +273,11 @@ class CommandDispatcher:
 
         # entity/options {"optimistic": false} (docs/04 §5) forces optimism off regardless of
         # this message's own no_optimistic flag; unset or true leaves the message's flag as-is.
-        effective_optimistic = optimistic and self._optimistic_overrides.get(entity_idx, True)
+        # `performance.optimistic` (docs/07 §2) is the installation-wide fallback when no
+        # per-entity override exists at all.
+        effective_optimistic = optimistic and self._optimistic_overrides.get(
+            entity_idx, self._default_optimistic
+        )
         if effective_optimistic and binding.optimistic_attr is not None:
             attr_idx = binding.optimistic_attr
             self._state.mark_optimistic(entity_idx, attr_idx, validated, attr_bit=1 << attr_idx)

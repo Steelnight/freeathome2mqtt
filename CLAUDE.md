@@ -332,6 +332,64 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
   container verification needed GitHub's runners, not this session's own judgement, and that is
   what caught both.
 
+- **YAGNI-cleanup round (post-WP12)** — a deep review found several `config.yaml` knobs that
+  `docs/07-configuration.md` documents as real, meaningful settings but that `settings_to_
+  supervisor_config()` silently never threaded anywhere: `mqtt.client_id`, `mqtt.qos_state`/
+  `qos_discovery`, `mqtt.force_disable_retain`, `mqtt.reject_unauthorized`, `sysap.request_timeout`,
+  `performance.optimistic` (the installation-wide default beneath any per-entity `entity/options`
+  override), and `availability.enabled`/`per_device` (gating only the per-device `<entity>/
+  availability` signal — `BridgeAvailability`'s `bridge/state` stays unconditional, per ADR-008's
+  "mandatory core plumbing, not a feature"). All seven are now wired; `settings.py`'s module
+  docstring names the remaining, still-deliberate gaps (unchanged) plus the new `availability.
+  stale_after` one (docs/06 §5.3: needs a last-changed timestamp per entity, new state rather than
+  just wiring, so it stays out of scope here). `model/entity.py`'s `AttributeSpec.entity_category`
+  (docs/03 §3.2, "passed to HA") was similarly dead — parsed from every profile but never reaching
+  a discovery payload; `model/compiler.py` now promotes it to `Entity.entity_category` for the
+  unambiguous case (a profile with exactly one attribute, e.g. `window_door_sensor`), and
+  `homeassistant/discovery.py` includes it in the payload. Left deliberately unpromoted: multi-
+  attribute profiles that mark only *some* attributes diagnostic (`room_temperature_controller`'s
+  `on_off`/`eco`/`mode`, `dimming_actuator`'s `forced_position`) — HA's `entity_category` is a
+  whole-entity field, and naively promoting one would mark the whole climate/light entity
+  diagnostic, hiding a functional control from the dashboard; those YAML keys stand as documented,
+  presently-inert per-attribute metadata rather than a wrong auto-derivation.
+
+  Two initial "delete as dead code" candidates turned out to be real, deliberate design instead
+  once checked against `docs/`, per CLAUDE.md §4 — not touched: `EntitiesStore.remove()`
+  (docs/07 §4.1 explicitly keeps it "for tooling/tests", distinct from `entity/remove`'s durable
+  `enabled: false` mechanism) and `RestClient`'s `max_attempts`/`backoff_*` constructor params
+  (unused by any *production* call site, but exercised throughout `tests/test_rest.py` to keep
+  retry/backoff tests fast — legitimate dependency injection, not speculative flexibility).
+  `requires.inputs` and `availability: "none"` (docs/03 §3.1) are likewise real, documented profile-
+  schema options simply not yet exercised by any shipped profile, not scope creep — left as-is.
+  The unused `testcontainers` dev dependency (superseded by the embedded `amqtt` fake broker back
+  in WP5, docs/10 §3.4, but never removed from `pyproject.toml`) was deleted outright.
+
+  The largest single finding: `find_jid`/`SysApUser.jid` (docs/01 §1.1's Basic-auth username
+  fallback) existed since WP1 but was never called from anywhere — and wiring it in surfaced a
+  real, independent bug along the way. `sysap/ws.py`'s `WsReader.run()` retried *every* WS
+  connection failure forever with backoff, including a `401`/`403` on the handshake — silently
+  contradicting docs/06 §3's own "Auth failure → Immediately. Do not retry." table row, and meaning
+  a simple wrong `sysap.password` already hung `supervisor.py`'s `_wait_until(lambda: ws.
+  reconnect_count >= 1)` forever instead of failing fast, independent of the jid fallback entirely.
+  Fixed with the same discipline `sysap/rest.py`'s `AuthenticationError`/P-20 already uses:
+  `WsReader` gained `WsAuthenticationError` (raised immediately, never retried, on a `401`/`403`
+  handshake) and a one-shot `connect_once()` startup probe — deliberately *not* a full
+  `get_configuration()` REST call, which would either double the one real config fetch ADR-007
+  requires or (fetched before the WS connects) reopen the exact lost-update race P-22 exists to
+  close. `restart_on_failure` gained a small `_NEVER_RESTARTED_EXCEPTIONS` category (alongside its
+  existing `CancelledError` exemption) so a supervised `ws_reader` task dying with
+  `WsAuthenticationError` propagates immediately rather than being retried five times first.
+  `Supervisor._resolve_sysap_credentials()` now runs `connect_once()` with the configured username
+  before `ws_reader` is ever spawned as a supervised, never-gives-up task; on a `401`/`403` it
+  looks up the `jid` from the already-fetched `settings.json` `users[]` and retries once, logged at
+  INFO per docs/01 §1.1's own instruction, before letting a second failure propagate fatally.
+  `dry_run()` (which never constructs a `WsReader` by design) gets the same fallback the simpler
+  way, via `AuthenticationError` from its own `RestClient` call — an acceptable second full config
+  fetch there, since it is a one-shot diagnostic command, not the hot startup path. `cli.py` gained
+  an `except* WsAuthenticationError` clause alongside the existing `TaskDiedTooManyTimesError` one,
+  logging a clear, actionable message (matching F4/P-20's "fail the bridge with a clear message")
+  and exiting non-zero rather than surfacing a raw `ExceptionGroup` traceback.
+
 Every work package in the plan (WP0–WP12) has landed.
 
 ---

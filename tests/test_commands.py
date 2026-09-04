@@ -263,6 +263,7 @@ class _Environment:
 async def _environment(
     *,
     debounce_s: float = 0.05,
+    default_optimistic: bool = True,
     optimistic_overrides: dict[int, bool] | None = None,
     debounce_overrides: dict[int, float] | None = None,
 ) -> AsyncIterator[_Environment]:
@@ -320,6 +321,7 @@ async def _environment(
                 rate_limiter=rate_limiter,
                 base_topic=BASE,
                 debounce_s=debounce_s,
+                default_optimistic=default_optimistic,
                 optimistic_overrides=optimistic_overrides or {},
                 debounce_overrides=debounce_overrides or {},
             )
@@ -494,6 +496,17 @@ async def test_per_entity_optimistic_override_false_suppresses_the_optimistic_wr
     # entity/options {"optimistic": false} (docs/04 §5, docs/07 §4.1) must force optimism off
     # even though this particular message never set no_optimistic itself.
     async with _environment(optimistic_overrides={0: False}) as env:
+        await env.outsider.publish(f"{BASE}/switch/set", orjson.dumps({"state": True}))
+        await _wait_until(lambda: env.fake.request_count(_dp_path(f"{SERIAL}.ch0000.idp0000")) >= 1)
+
+        assert env.state.values[0][0] is None  # the REST write still happened, just not the guess
+        assert env.state.unconfirmed[0] == 0
+
+
+async def test_default_optimistic_false_suppresses_optimism_with_no_per_entity_override() -> None:
+    # performance.optimistic: false (docs/07 §2) is the installation-wide fallback, distinct
+    # from an entity/options per-entity override -- it must take effect on its own.
+    async with _environment(default_optimistic=False) as env:
         await env.outsider.publish(f"{BASE}/switch/set", orjson.dumps({"state": True}))
         await _wait_until(lambda: env.fake.request_count(_dp_path(f"{SERIAL}.ch0000.idp0000")) >= 1)
 

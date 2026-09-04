@@ -170,6 +170,28 @@ async def test_flush_publishes_dirty_entities_retained() -> None:
             await _stop(client, task)
 
 
+async def test_flush_publishes_with_the_configured_qos_state() -> None:
+    entities = [_entity(0, ("state",))]
+    state = StateStore(entities)
+    async with running_fake_broker() as broker:
+        client, task = await _connected_client(broker)
+        try:
+            publisher = Publisher(
+                entities=entities,
+                state=state,
+                mqtt=client,
+                publish_last_changed=False,
+                qos_state=1,
+            )
+            state.apply(0, 0, True)
+            await publisher.flush()
+
+            await _wait_until(lambda: broker.retained_messages.get(f"{BASE}/test0") is not None)
+            assert broker.retained_messages[f"{BASE}/test0"].qos == 1
+        finally:
+            await _stop(client, task)
+
+
 async def test_flush_clears_the_dirty_set() -> None:
     entities = [_entity(0, ("state",))]
     state = StateStore(entities)

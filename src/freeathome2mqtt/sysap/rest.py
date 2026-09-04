@@ -161,6 +161,7 @@ class RestClient:
         session: aiohttp.ClientSession,
         ssl: ssl.SSLContext | bool = True,
         max_inflight: int = 4,
+        request_timeout: float | None = None,
         max_attempts: int = 5,
         backoff_initial: float = 0.5,
         backoff_factor: float = 2.0,
@@ -172,6 +173,11 @@ class RestClient:
         self._session = session
         self._ssl = ssl
         self._limiter = AdaptiveLimiter(max_inflight)
+        # Per-request, not session-wide (docs/07 §2 sysap.request_timeout): the SysAP's REST
+        # session is shared with `WsReader` (ADR-001's "one shared ClientSession"), whose
+        # WebSocket connection is long-lived by design -- a session-wide `ClientTimeout.total`
+        # would kill it after `request_timeout` seconds instead of bounding only REST calls.
+        self._timeout = aiohttp.ClientTimeout(total=request_timeout) if request_timeout else None
         self._max_attempts = max_attempts
         self._backoff_initial = backoff_initial
         self._backoff_factor = backoff_factor
@@ -265,6 +271,12 @@ class RestClient:
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         url = f"{self._base_url}{path}"
+        # Passing `timeout=None` to aiohttp explicitly disables its request timeout entirely,
+        # which is not "use the session's own default" -- so the kwarg is only added at all
+        # when `request_timeout` was actually configured, leaving the session default untouched
+        # otherwise.
+        if self._timeout is not None:
+            kwargs["timeout"] = self._timeout
         attempt = 0
         while True:
             attempt += 1

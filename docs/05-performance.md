@@ -22,7 +22,7 @@ CI enforces these as regression gates with a 25 % tolerance band.
 | P8 | Resync after a 60 s WS outage | **≤ 1.5 s**, **1** HTTP request | `bench_resync` |
 | P9 | RSS at 1 000 entities, steady state | **≤ 120 MB** | `bench_memory` |
 | P10 | Idle CPU (0.1 events/s) | **≤ 0.5 %** of one core | `bench_idle` |
-| P11 | Concurrent SysAP requests, ever | **≤ `max_inflight`** | asserted in the fake SysAP |
+| P11 | Concurrent SysAP requests, ever | **≤ `max_inflight`** | `test_concurrent_requests_never_exceed_max_inflight` (asserted via the fake SysAP's `peak_concurrency()`) |
 | P12 | Unchanged-value frames producing MQTT traffic | **0** | `bench_dedup` |
 
 P12 deserves emphasis. In real installations a large fraction of WebSocket frames carry a value

@@ -358,3 +358,30 @@ async def test_502_retried_then_succeeds_within_max_attempts() -> None:
         assert fake.request_count("/fhapi/v1/api/rest/configuration") == 2
         # the one 502 halved it (4 -> 2), then the following success recovered it by one (2 -> 3)
         assert rest.concurrency_limit == 3
+
+
+# ------------------------------------------------------------------------------- budget P11
+
+
+async def test_concurrent_requests_never_exceed_max_inflight() -> None:
+    """docs/05 §1 budget P11: concurrent SysAP requests, ever, stay <= `max_inflight`.
+
+    The budget table names its verification as "asserted in the fake SysAP" -- `FakeSysAp` has
+    carried `peak_concurrency()` for exactly this since WP2, but nothing ever asserted it against
+    a real `RestClient`, so the budget was documented and unenforced. This is that assertion.
+
+    `set_latency` is what makes it meaningful: without it each request completes before the next
+    is issued and the peak would be 1 regardless of any limiter, so the test would pass even with
+    the semaphore removed. The lower bound below pins that the client really does parallelise.
+    """
+    max_inflight = 4
+    async with running_fake_sysap(FakeSysAp(configuration=SAMPLE_CONFIG)) as (fake, client):
+        rest = _client_for(client, max_inflight=max_inflight, max_attempts=1)
+        fake.set_latency(25)
+
+        await asyncio.gather(*(rest.get_configuration() for _ in range(20)))
+
+        assert fake.peak_concurrency() <= max_inflight
+        # Not vacuous: the client must actually be issuing requests in parallel, otherwise the
+        # bound above would hold trivially for a fully serial client.
+        assert fake.peak_concurrency() > 1

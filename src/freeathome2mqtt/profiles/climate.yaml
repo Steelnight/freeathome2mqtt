@@ -1,0 +1,127 @@
+# Tier-1 climate profiles (docs/03 §9): room temperature controller and heating/cooling/valve
+# actuator.
+
+- id: room_temperature_controller
+  description: >-
+    A room temperature controller with on/off, eco, and heating/cooling mode switching
+    (docs/03 §7's room_temperature_controller transform).
+  functions:
+    - FID_ROOM_TEMPERATURE_CONTROLLER_MASTER_WITH_FAN
+    - FID_ROOM_TEMPERATURE_CONTROLLER_MASTER_WITHOUT_FAN
+  requires:
+    outputs:
+      [
+        AL_MEASURED_TEMPERATURE,
+        AL_CONTROLLER_ON_OFF,
+        AL_ECO_ON_OFF_INDICATION,
+        AL_INFO_HEATING_COOLING_MODE,
+      ]
+  transform: room_temperature_controller
+  homeassistant:
+    component: climate
+
+  attributes:
+    # Positional inputs to model/transforms.py's RoomTemperatureControllerTransform: index 0, 1,
+    # 2 must stay on_off, eco, mode in exactly this order (docs/03 §7) -- declared first here so
+    # they get exactly those indices; measured_temperature/heating_value are not transform inputs
+    # and so their position doesn't matter.
+    on_off:
+      pairing: AL_CONTROLLER_ON_OFF
+      codec: bool01
+      kind: state
+      entity_category: diagnostic
+    eco:
+      pairing: AL_ECO_ON_OFF_INDICATION
+      codec: bool01
+      kind: state
+      entity_category: diagnostic
+    # ⚠ The raw encoding of AL_INFO_HEATING_COOLING_MODE is not documented; "0"/"1" here is an
+    # assumption pending verification against real hardware (docs/11 guidance #4).
+    mode:
+      pairing: AL_INFO_HEATING_COOLING_MODE
+      codec: enum
+      kind: state
+      values: { "0": heating, "1": cooling }
+      default: heating
+      entity_category: diagnostic
+    measured_temperature:
+      pairing: AL_MEASURED_TEMPERATURE
+      codec: float
+      kind: state
+      precision: 1
+      unit: "°C"
+    heating_value:
+      pairing: AL_INFO_VALUE_HEATING
+      codec: percent_int
+      kind: state
+      unit: "%"
+
+  commands:
+    setpoint_temperature:
+      pairing: AL_SET_POINT_TEMPERATURE
+      codec: float
+      continuous: true
+    on_off:
+      pairing: AL_CONTROLLER_ON_OFF
+      codec: bool01
+    eco:
+      pairing: AL_ECO_ON_OFF
+      codec: bool01
+    mode:
+      pairing: AL_SELECTED_HEATING_COOLING_MODE_REQUEST
+      codec: enum
+      values: { heating: "0", cooling: "1" }
+
+- id: room_temperature_controller_basic
+  description: A room temperature controller without on/off, eco, or mode switching.
+  functions:
+    - FID_ROOM_TEMPERATURE_CONTROLLER_MASTER_WITH_FAN
+    - FID_ROOM_TEMPERATURE_CONTROLLER_MASTER_WITHOUT_FAN
+  requires:
+    outputs: [AL_MEASURED_TEMPERATURE]
+  homeassistant:
+    component: climate
+
+  attributes:
+    measured_temperature:
+      pairing: AL_MEASURED_TEMPERATURE
+      codec: float
+      kind: state
+      precision: 1
+      unit: "°C"
+    heating_value:
+      pairing: AL_INFO_VALUE_HEATING
+      codec: percent_int
+      kind: state
+      unit: "%"
+
+  commands:
+    setpoint_temperature:
+      pairing: AL_SET_POINT_TEMPERATURE
+      codec: float
+      continuous: true
+
+- id: heating_actuator
+  description: A heating valve actuator, driven by a percentage actuating value.
+  functions:
+    - FID_HEATING_ACTUATOR
+  requires:
+    outputs: [AL_ACTUATING_VALUE_HEATING]
+  # docs/04 §6.2: "valve or number" -- number fits a bare 0-100% actuating value with no
+  # open/close semantics more directly than HA's valve platform.
+  homeassistant:
+    component: number
+
+  attributes:
+    heating_value:
+      pairing: AL_ACTUATING_VALUE_HEATING
+      codec: percent_int
+      kind: state
+      unit: "%"
+
+  commands:
+    heating_value:
+      pairing: AL_ACTUATING_VALUE_HEATING
+      codec: percent_int
+      continuous: true
+      optimistic: heating_value

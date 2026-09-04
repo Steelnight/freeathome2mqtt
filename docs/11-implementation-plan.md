@@ -18,7 +18,7 @@ work them in order, and should not start a package until its predecessors' accep
 ## WP0 — Bootstrap
 
 **Deliverables**
-- `pyproject.toml` (hatchling, Python ≥ 3.12, deps: `aiohttp`, `aiomqtt`, `orjson`, `uvloop`,
+- `pyproject.toml` (hatchling, Python 3.14.7 pinned exactly, deps: `aiohttp`, `aiomqtt`, `orjson`, `uvloop`,
   `pydantic`, `pyyaml`, `jsonschema`; dev: `pytest`, `pytest-asyncio`, `pytest-cov`,
   `pytest-benchmark`, `hypothesis`, `ruff`, `mypy`, `testcontainers`).
 - `ruff.toml` with `G004` (no f-strings in logging) enabled — this is a performance rule (P-50), not

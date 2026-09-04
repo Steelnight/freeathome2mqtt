@@ -91,6 +91,7 @@ class EgressBinding:                # egress: how to execute a command
     continuous: bool                # debounce this one
     optimistic_attr: int | None     # which attribute to update optimistically
     validate: Callable[[Any], Any]  # range/enum check; raises CommandError
+    confirm: bool = True            # arm bus/reconcile.py's timer for this command (P-19; WP7)
 ```
 
 The tables:
@@ -206,6 +207,7 @@ forking.
 | `default` | no | Value when the datapoint is `""` or unmapped. Prefer `null`. |
 | `entity_category` | no | `diagnostic` / `config`; passed to HA |
 | `precision` | no | Decimal places for float codecs; used for change detection too |
+| *(any other key)* | no | Passed to the codec factory verbatim as a keyword argument — e.g. `scaled`'s `factor`/`offset` (§5). Not enumerated here because the set is open-ended over the codec registry; `model/entity.py`'s `AttributeSpec.codec_params` holds these unmodified. |
 
 ### 3.3 Command object
 
@@ -218,6 +220,7 @@ forking.
 | `continuous` | no, default `false` | Debounce this command |
 | `optimistic` | no | Attribute name to update optimistically; omit to disable optimism for this command |
 | `confirm` | no, default `true` | Whether to expect a WS echo and reconcile if absent |
+| *(any other key)* | no | Passed to the codec factory verbatim, as for the attribute object above — `CommandSpec.codec_params` in `model/entity.py`. |
 
 ### 3.4 Profile matching
 
@@ -246,12 +249,17 @@ Channels with no matching profile are published in `bridge/devices` with
 `model/compiler.py`, pure function:
 
 ```python
-def compile(config: dict, profiles: ProfileRegistry, options: CompileOptions) -> Model
+def compile(config: Configuration, profiles: ProfileRegistry, options: CompileOptions) -> Model
 ```
+
+`config` is already unwrapped from its SysAP-UUID key (`sysap.schema.Configuration`, docs/01 §4)
+— that unwrap happens once, in `sysap.rest.RestClient` (docs/01 §3), not here. Repeating it on
+every recompile would defeat the "resolve once, cache for the process's life" rule that section
+states.
 
 Steps:
 
-1. Resolve the SysAP UUID and the floorplan into `{floor_id: {name, rooms: {room_id: name}}}`.
+1. Resolve the floorplan into `{floor_id: {room_id: name}}`.
 2. For each device: apply the interface filter; record `unresponsive`/`defect` for availability.
 3. For each channel: resolve floor/room (channel first, then device); apply the orphan filter;
    match a profile (§3.4).
@@ -263,7 +271,10 @@ Steps:
 7. Seed `values` from the datapoints' current `value` fields — the snapshot already has them, so no
    extra request is needed.
 8. Pre-render Home Assistant discovery payloads and `orjson.dumps` them once.
-9. Emit `Model(entities, ingress, egress, by_id, by_topic, discovery, stats)`.
+9. Emit `Model(entities, ingress, egress, by_id, by_topic, discovery, initial_values, stats)` —
+   `initial_values` is step 7's output: a tuple parallel to `entities`, each entry itself a tuple
+   parallel to that entity's `attr_names`, so seeding a `StateStore` is a direct walk with no
+   second pass over the config.
 
 **Determinism is a hard requirement.** Same input → byte-identical output, including ordering. Test
 it directly (`test_compiler_is_deterministic`), because non-determinism here manifests as entities
@@ -338,9 +349,16 @@ function in `model/transforms.py`:
 class RoomTemperatureControllerTransform(Transform):
     def derive(self, values: list[Any]) -> dict[str, Any]:
         """Derive composite attributes from raw ones after any change."""
-    def command(self, name: str, value: Any, values: list[Any]) -> list[tuple[str, str]]:
-        """Return (rest_path, raw_value) writes for one logical command."""
+    def command(self, name: str, value: Any, values: list[Any]) -> list[tuple[str, Any]]:
+        """Return (sub_command_name, symbolic_value) writes for one logical command."""
 ```
+
+`command()` returns the *profile's own command names* and each command's own *symbolic*
+(pre-encode) value, not REST paths or raw wire strings: a transform is a pure function with no
+compile-time knowledge of a specific entity's compiled paths or codec encodings, so it cannot
+fabricate either. The caller (`bus/commands.py`, WP7) resolves each `sub_command_name` to that
+entity's compiled `EgressBinding` and calls its `encode()`, exactly as it would for a
+non-transformed command.
 
 The full expected list — do not grow it without justification:
 
@@ -348,9 +366,24 @@ The full expected list — do not grow it without justification:
 |---|---|
 | `room_temperature_controller` | HVAC mode is derived from `AL_CONTROLLER_ON_OFF` + `AL_ECO_ON_OFF` + `AL_INFO_HEATING_COOLING_MODE`; setting a mode writes 2–3 datapoints |
 | `cover_with_slats` | Position and slat angle interact; `stop` means different things while moving vs stopped |
-| `color_light` | HSV/RGB packed into one datapoint; brightness interacts with on/off |
-| `energy_meter` | Multi-phase totals derived from per-phase datapoints |
-| `des_door_station` | Ring events, unlock, and mute are separate channels that users expect as one entity |
+
+Three entries once planned for this table, before WP11's actual tier-2/3 profile work (`docs/11
+WP11`) checked them against the generated pairing table (`sysap/codes/pairings.py`) and the real
+per-channel-one-entity architecture (`docs/02 §1`), and turned out not to hold up:
+
+- `des_door_station` ("ring events, unlock, and mute are separate channels that users expect as
+  one entity") would need one entity assembled from *several channels'* datapoints, which the
+  `Transform` base class's own contract can't do — it only ever sees one entity's own `values`,
+  never another channel's. DES door opener and door ringing sensor are modelled as two ordinary
+  profiles instead (`profiles/access.yaml`), the same way tier-1's `movement_detector` and its
+  companion brightness-sensor channel are already two separate entities, not one merged one.
+- `energy_meter` ("multi-phase totals derived from per-phase datapoints") assumed L1/L2/L3-style
+  sub-readings that don't actually exist anywhere in the generated pairing table — every energy/
+  inverter/battery/meter pairing there is already a single, already-totalled reading. Plain
+  multi-attribute profiles need no derivation (`profiles/energy.yaml`).
+- `color_light` (full HSV/RGB, not just colour temperature) isn't required by any tier-1/2/3 entry
+  in `docs/03 §9` at all, and its exact wire packing is unverified (no docs/01 section covers it) --
+  left for a future WP with real hardware to check against, rather than guessed at now.
 
 Transforms run **after** change detection and only for entities that actually changed, so they are
 off the common hot path. They must be pure functions of `values` — no I/O, no clock, no globals —
@@ -404,7 +437,7 @@ A WS frame `{"ABB7F500E17A/ch0003/odp0001": "60"}` becomes: one dict hit, `int(f
 
 ## 9. Profile coverage targets
 
-Derived from the reference implementation's supported set. WP4 delivers tier 1; WP8 tiers 2–3.
+Derived from the reference implementation's supported set. WP4 delivers tier 1; WP11 tiers 2–3.
 
 **Tier 1 — must have**
 switch actuator · dimming actuator · colour-temperature actuator · shutter/blind/awning/attic-window

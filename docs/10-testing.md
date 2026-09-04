@@ -173,9 +173,23 @@ Each maps to a workflow in [`docs/08`](08-workflows.md) and a pitfall.
 Per [`docs/05 §8`](05-performance.md#8-benchmarks). Run against the fake SysAP and a real embedded
 broker so they measure the whole path, not a microbenchmark of one function.
 
-Results go to `bench/results.json`; CI compares against a committed baseline and fails on a
-regression beyond 25 %. Because CI runners are noisy, the gate is on **relative** regression, and the
-absolute budgets in `docs/05 §1` are verified on the reference Pi 4 before each release.
+Results go to `bench/results.json`; CI compares against a committed baseline (`bench/baseline.json`)
+and fails on a regression beyond 25 %, via `tools/compare_bench.py`. Because CI runners are noisy,
+the gate is on **relative** regression, and the absolute budgets in `docs/05 §1` are verified on the
+reference Pi 4 before each release.
+
+**As implemented (WP12), this relative-baseline comparison covers only `test_bench_compile`.** It
+is the sole bench test that is synchronous, CPU-bound work over pure data structures, which is why
+it alone uses pytest-benchmark's `benchmark` fixture (the thing that actually produces the
+JSON-diffable, storage-backed stats this comparison needs). Every other `tests/bench/` module
+benchmarks an async path against the fake SysAP/broker — real socket I/O — where the fixture's
+synchronous `benchmark()` call doesn't apply; those keep asserting directly against their own
+absolute `docs/05 §1` budget with manual `time.perf_counter()` timing, as they always have. CI's
+`bench` job (main branch only, per the table below) runs the **full** `pytest -m bench` suite
+either way, so every budget is still checked on every merge to `main` — it just wasn't run in CI
+at all before WP12. Extending the relative-regression comparison to the async benchmarks (e.g. via
+a hand-rolled timer wrapper matching this project's own "minimal dependency surface" bent) is a
+tracked future improvement, not attempted here.
 
 ## 8. Soak test
 
@@ -205,8 +219,8 @@ Assertions at the end:
 | Profile schema validation | Every YAML validates against `_schema.json` |
 | `gen_codes.py --check` | Generated files are byte-identical to committed ones (P-58) |
 | Profile coverage | ≥ 85 % of channels in `captured/*.json` match a profile |
-| Docs links | Every relative link in `docs/` resolves |
-| `pytest -m bench` | Regression gate vs. baseline (main branch only) |
+| Docs links | Every relative link (and `#fragment`) in `docs/` resolves — `tools/check_docs_links.py`, gated by `test_real_docs_links_resolve` inside the `pytest -m "not bench and not soak"` row above rather than a separate CI job, the same way profile coverage above is |
+| `pytest -m bench` | Regression gate vs. baseline (main branch only, §7) |
 | Container build | Multi-arch, plus a smoke test that the image starts and `--check-config` passes |
 
 ## 10. Manual verification against real hardware
@@ -223,6 +237,8 @@ installation, verify every **⚠ verify empirically** marker in
 5. What is the actual concurrency threshold at which `502`s begin? (Calibrates `max_inflight`.)
 6. Does every actuator type echo its command on the WebSocket? (Sets `confirm` per profile.)
 7. Cover and slat orientation on real hardware, per actuator type.
+8. Cross-check the generated `pairings.py` (docs/01 §7) against a live `GET /api/rest/pairings` —
+   the vendored snapshot has not been verified against a real SysAP's own pairing catalogue.
 
 Each answer updates `docs/01` and adds a fixture. Until then the defaults are conservative, and the
 markers stay in the document rather than being quietly dropped.

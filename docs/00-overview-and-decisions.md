@@ -67,7 +67,7 @@ Derived from real installations; the implementation should hold these as test pa
 
 | Concern | Choice | Why |
 |---|---|---|
-| Language / runtime | **Python 3.12+** | The only comprehensive open-source mapping of free@home function → semantics is Python ([`local-abbfreeathome`](https://github.com/kingsleyadam/local-abbfreeathome)). This workload is I/O-bound; the CPU-heavy parts (JSON, TLS, MQTT framing) are all C extensions. |
+| Language / runtime | **Python 3.14.7, pinned exactly** | The only comprehensive open-source mapping of free@home function → semantics is Python ([`local-abbfreeathome`](https://github.com/kingsleyadam/local-abbfreeathome)). This workload is I/O-bound; the CPU-heavy parts (JSON, TLS, MQTT framing) are all C extensions. Pinned via `.python-version` and `requires-python == 3.14.7` (rather than a floating `>=`) so `uv sync` resolves the identical interpreter in dev, CI and the container image; bump all three together, deliberately, when moving to a newer patch. |
 | Event loop | **uvloop** | 2–4× throughput over the stdlib loop, one line to install, no API change. Fall back to the stdlib loop where unavailable (e.g. some musl builds). |
 | JSON | **orjson** | 3–10× faster than `json` and, crucially, parses the multi-MB config snapshot in a fraction of the time. Also faster to serialise the many small state payloads. |
 | HTTP + WS client | **aiohttp** | Proven against SysAP quirks (self-signed certs, `502` on overload, WS heartbeat). Single `ClientSession` for connection reuse. |
@@ -76,7 +76,7 @@ Derived from real installations; the implementation should hold these as test pa
 | Hot-path data | `@dataclass(slots=True, frozen=True)`, plain `dict`/`list` | No validation, no attribute dicts, no property indirection on the event path. |
 | Logging | stdlib `logging` with lazy `%`-style args | Zero formatting cost when a level is disabled. A `structlog` JSON sink is optional. |
 | CLI / packaging | `argparse` + `hatchling`, developed with `uv` | Minimal dependency surface. |
-| Container | `python:3.13-slim`, multi-arch `linux/amd64,linux/arm64,linux/arm/v7` | The primary deployment target is a Raspberry Pi next to the SysAP. |
+| Container | `python:3.14.7-slim`, multi-arch `linux/amd64,linux/arm64,linux/arm/v7` | The primary deployment target is a Raspberry Pi next to the SysAP. Matches the pinned interpreter above exactly. |
 
 **Rejected alternative: TypeScript/Node.** It would let us follow zigbee2mqtt's structure more
 literally and its `mqtt.js` client is excellent. It was rejected because every ounce of free@home
@@ -125,6 +125,20 @@ retaining the MIT notice in `src/freeathome2mqtt/sysap/codes/NOTICE`. The upstre
 originate from `Busch-Jaeger/node-free-at-home` (`src/pairingIds.ts`); check its licence before
 vendoring and prefer generating from the vendor source where the licence permits. Resolve this in
 WP0 before writing any generated file.
+
+**Resolved in WP0.** `Busch-Jaeger/node-free-at-home`'s `package.json` declares an **ISC** licence —
+permissive, MIT-compatible, requiring only retention of the copyright/permission notice. Both
+upstream sources are therefore safe to vendor generated tables from. This project is licensed
+**MIT** (see `LICENSE`), which is compatible with consuming both an MIT and an ISC source. When
+`tools/gen_codes.py` lands in WP1, it must emit `src/freeathome2mqtt/sysap/codes/NOTICE` retaining:
+
+- the `local-abbfreeathome` MIT copyright notice, for the `Pairing`/`Function`/`Parameter`/
+  `Interface` enumerations and function→behaviour knowledge extracted from it, and
+- the `Busch-Jaeger/node-free-at-home` ISC copyright notice, for any pairing ID sourced from its
+  `src/pairingIds.ts`,
+
+each attributed to its origin file. No generated file is committed before `NOTICE` exists alongside
+it.
 
 ---
 

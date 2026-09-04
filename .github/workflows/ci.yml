@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install
+      - run: uv sync --group dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  typecheck:
+    name: Type check (mypy --strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install
+      - run: uv sync --group dev
+      - run: uv run mypy --strict src/
+
+  test:
+    name: Test + coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install
+      - run: uv sync --group dev
+      - run: uv run pytest -m "not bench and not soak"
+
+  gen-codes:
+    name: Generated code tables (docs/01 §7)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install
+      - run: uv sync --group dev
+      - run: uv run python -m freeathome2mqtt.tools.gen_codes --check
+
+  container:
+    name: Container build + smoke test (docs/10 §9)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # Multi-arch (docs/00 §5's target platforms) build-only pass -- not loaded or pushed, so
+      # this is purely "does every arch's build succeed" under QEMU emulation for the non-native
+      # ones. cache-from/to lets the native-arch build below reuse these layers.
+      - name: Build (multi-arch, verify only)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # A multi-platform build has no single manifest to --load into the local docker engine, so
+      # the smoke test needs its own native-arch build -- cached from the pass above, so this is
+      # fast.
+      - name: Build (native arch, for the smoke test)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: freeathome2mqtt:ci
+          cache-from: type=gha
+
+      - name: Smoke test -- image starts and --check-config passes
+        run: |
+          cat > /tmp/smoke-config.yaml <<'EOF'
+          sysap:
+            host: https://192.0.2.1
+            username: installer
+            password: smoke-test-password
+          mqtt:
+            server: mqtt://192.0.2.2:1883
+          EOF
+          docker run --rm -v /tmp/smoke-config.yaml:/config.yaml:ro freeathome2mqtt:ci --check-config
+
+  bench:
+    name: Benchmarks vs. baseline (docs/05 §8; main only)
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install
+      - run: uv sync --group dev
+      # The full bench suite: every test's own absolute docs/05 §1 budget assertion runs
+      # regardless of whether it goes through pytest-benchmark's `benchmark` fixture.
+      - run: uv run pytest -m bench --no-cov
+      # Only `test_bench_compile` uses the fixture (the rest benchmark async I/O, which the
+      # fixture's synchronous benchmark() call doesn't support -- docs/10 §7) and so is the only
+      # one with a comparable baseline in bench/baseline.json.
+      - run: >
+          uv run pytest tests/bench/test_bench_compile.py -m bench --no-cov --benchmark-only
+          --benchmark-json=bench/results.json
+      - run: >
+          uv run python -m freeathome2mqtt.tools.compare_bench
+          --baseline bench/baseline.json --results bench/results.json

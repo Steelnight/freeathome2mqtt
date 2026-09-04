@@ -1,0 +1,52 @@
+# docker-compose.example.yml (docs/11 WP12).
+#
+# Copy to docker-compose.yml, copy config.example.yaml to config.yaml next to it and fill in the
+# required fields, then `docker compose up -d`. Includes a Mosquitto broker for anyone who doesn't
+# already have one -- delete that service and point mqtt.server at an existing broker otherwise.
+
+services:
+  freeathome2mqtt:
+    image: ghcr.io/steelnight/freeathome2mqtt:latest
+    # Or build locally instead of pulling: uncomment the next line and comment out `image:` above.
+    # build: .
+    restart: unless-stopped
+    init: true  # PID 1 reaps zombies and forwards signals correctly (see Dockerfile)
+    environment:
+      # FAH_PASSWORD: your-sysap-password   # only if config.yaml's sysap.password uses !env
+      TZ: UTC  # log timestamps; the base image has no timezone data installed, so this is a
+               # no-op unless you also mount /usr/share/zoneinfo from the host
+    volumes:
+      - ./config.yaml:/config.yaml:ro
+      - ./data:/data
+    # Uncomment to expose the optional Prometheus endpoint (advanced.metrics.enabled: true in
+    # config.yaml) to the host:
+    # ports:
+    #   - "9102:9102"
+    depends_on:
+      - mosquitto
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+    ports:
+      - "1883:1883"
+
+volumes:
+  mosquitto-data:
+
+# ----------------------------------------------------------------------------------------- notes
+#
+# - ./data must be writable by the container's freeathome2mqtt user (fixed uid:gid 10001:10001,
+#   see Dockerfile): `mkdir -p data && chown -R 10001:10001 data` once on the host before the
+#   first `docker compose up`, or Docker will create it as root and every write will fail.
+# - config.yaml is mounted read-only: the bridge never rewrites it (docs/07 §1) -- runtime state
+#   (aliases, per-entity options, discovery cache) lives entirely under ./data instead.
+# - mosquitto.conf needs at least:
+#     listener 1883
+#     allow_anonymous true
+#   (or your own authentication -- see Mosquitto's own docs; out of scope here).
+# - mqtt.server in config.yaml should then be mqtt://mosquitto:1883 (the compose service name),
+#   not localhost -- the two containers reach each other by service name on the compose network.

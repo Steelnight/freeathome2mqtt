@@ -1,0 +1,343 @@
+{
+  "de305d54-75b4-431b-adb2-eb6b9e546014": {
+    "sysapName": "Nasty Fixture",
+    "sysap": {},
+    "users": {},
+    "floorplan": {
+      "floors": {
+        "01": {
+          "name": "Erdgeschoss",
+          "rooms": {
+            "0C": {
+              "name": "Küche"
+            },
+            "0D": {
+              "name": "Büro"
+            },
+            "0E": {
+              "name": "Flur"
+            },
+            "0F": {
+              "name": "Große Straße 1"
+            }
+          }
+        },
+        "02": {
+          "name": "1. Obergeschoss",
+          "rooms": null
+        }
+      }
+    },
+    "devices": {
+      "ABB700990001": {
+        "displayName": "Deckenleuchte Modul",
+        "deviceId": "1010",
+        "articleNumber": "2000/1.1",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Deckenlicht",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "0C"
+          }
+        },
+        "floor": "01",
+        "room": "0C"
+      },
+      "ABB700990002": {
+        "displayName": "Deckenleuchte Modul",
+        "deviceId": "1010",
+        "articleNumber": "2000/1.1",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Deckenlicht",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "0D"
+          }
+        },
+        "floor": "01",
+        "room": "0D"
+      },
+      "ABB700990003": {
+        "displayName": "Sensor Modul",
+        "deviceId": "1013",
+        "articleNumber": "6220-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Ⓐ",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "0E"
+          },
+          "ch0001": {
+            "displayName": null,
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "0E"
+          }
+        },
+        "floor": "01",
+        "room": "0E"
+      },
+      "ABB700990004": {
+        "displayName": "Sensor Modul 2",
+        "deviceId": "9005",
+        "articleNumber": "6800-3-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Unpaired Sensor",
+            "functionID": "43",
+            "type": "TemperatureSensor",
+            "floor": "01",
+            "room": "0F",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 304,
+                "value": ""
+              }
+            },
+            "parameters": {}
+          },
+          "ch0001": {
+            "displayName": "Attic Sensor",
+            "functionID": "43",
+            "type": "TemperatureSensor",
+            "floor": "01",
+            "room": "0F",
+            "outputs": {
+              "odp0000": {
+                "pairingID": 304,
+                "value": "42.0"
+              }
+            },
+            "parameters": {}
+          }
+        },
+        "floor": "01",
+        "room": "0F"
+      },
+      "ABB700990005": {
+        "displayName": "Orphan Actuator",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Orphan Switch",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {}
+          }
+        }
+      },
+      "ABB700990006": {
+        "displayName": "Mystery Module",
+        "deviceId": "0000",
+        "articleNumber": "0000-0-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Unknown Function",
+            "functionID": "9999",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "0C"
+          },
+          "ch0001": {
+            "displayName": "Missing Function",
+            "functionID": "",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "0C"
+          },
+          "ch0002": {
+            "displayName": "Garbled Function",
+            "functionID": "ZZ",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "0C"
+          }
+        },
+        "floor": "01",
+        "room": "0C"
+      },
+      "ABB700990007": {
+        "displayName": "Küchengerät",
+        "deviceId": "2020",
+        "articleNumber": "1032-1-xx",
+        "interface": "TP",
+        "nativeId": "0",
+        "unresponsive": false,
+        "unresponsiveCounter": 0,
+        "defect": false,
+        "parameters": {},
+        "channels": {
+          "ch0000": {
+            "displayName": "Herdanschluss",
+            "functionID": "7",
+            "type": "SwitchActuator",
+            "inputs": {
+              "idp0000": {
+                "pairingID": 1,
+                "value": "0"
+              }
+            },
+            "outputs": {
+              "odp0000": {
+                "pairingID": 256,
+                "value": "0"
+              }
+            },
+            "parameters": {},
+            "floor": "01",
+            "room": "0C"
+          }
+        },
+        "floor": "01",
+        "room": "0C"
+      }
+    }
+  }
+}

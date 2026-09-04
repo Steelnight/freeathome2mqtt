@@ -1,0 +1,115 @@
+# Tier-1 sensor profiles (docs/03 §9): window-door, movement, brightness, temperature, switch
+# sensor, trigger, and smoke detector.
+
+- id: window_door_sensor
+  description: A window or door open/closed contact sensor.
+  functions:
+    - FID_WINDOW_DOOR_SENSOR
+    - FID_WINDOW_DOOR_SENSOR_TYPE0
+    - FID_WINDOW_DOOR_SENSOR_TYPE1
+  # The profile can't distinguish an actual window from an actual door (docs/04 §6.2 lists both
+  # as options); window is the more common installation and the documented default.
+  homeassistant:
+    component: binary_sensor
+    device_class: window
+
+  attributes:
+    state:
+      pairing: AL_WINDOW_DOOR
+      codec: bool01
+      kind: state
+      entity_category: diagnostic
+
+- id: movement_detector
+  description: A motion/presence detector, optionally blockable (docs/03 §9).
+  functions:
+    - FID_MOVEMENT_DETECTOR
+  homeassistant:
+    component: binary_sensor
+    device_class: motion
+
+  attributes:
+    # A PIR/motion sensor's detected state is retained until it clears, not a momentary press
+    # (docs/01 §6.6 is specifically about push buttons/switch sensors, not movement detectors).
+    state:
+      pairing: AL_MOVEMENT_DETECTOR_STATUS
+      codec: bool01
+      kind: state
+
+- id: brightness_sensor
+  description: An ambient light level sensor.
+  functions:
+    - FID_BRIGHTNESS_SENSOR
+  homeassistant:
+    component: sensor
+    device_class: illuminance
+
+  attributes:
+    # AL_BRIGHTNESS_LEVEL is a raw lux reading, not a 0..100 percentage -- percent_int would
+    # silently clamp any real value above 100.
+    illuminance:
+      pairing: AL_BRIGHTNESS_LEVEL
+      codec: int
+      kind: state
+      unit: lx
+
+- id: temperature_sensor
+  description: An ambient temperature sensor.
+  functions:
+    - FID_TEMPERATURE_SENSOR
+    - FID_TEMPERATURE_SENSOR_TYPE1
+  homeassistant:
+    component: sensor
+    device_class: temperature
+
+  attributes:
+    temperature:
+      pairing: AL_MEASURED_TEMPERATURE
+      codec: float
+      kind: state
+      precision: 1
+      unit: "°C"
+
+- id: switch_sensor
+  description: A rocker/toggle switch sensor (docs/01 §6.6) -- events, never retained state.
+  functions:
+    - FID_SWITCH_SENSOR
+  homeassistant:
+    component: event
+
+  attributes:
+    state:
+      pairing: AL_SWITCH_ON_OFF
+      codec: bool01
+      kind: event
+
+- id: trigger
+  description: A momentary push-button sensor (docs/01 §6.6) -- the edge is the signal, the
+    payload is meaningless.
+  functions:
+    - FID_PUSH_BUTTON_SENSOR
+    - FID_TRIGGER
+  homeassistant:
+    component: event
+    device_class: button
+
+  attributes:
+    pressed:
+      pairing: AL_SWITCH_ON_OFF
+      codec: trigger
+      kind: event
+
+- id: smoke_detector
+  description: A smoke alarm.
+  functions:
+    - FID_SMOKE_DETECTOR
+    - FID_SMOKE_DETECTOR_TYPE1
+  homeassistant:
+    component: binary_sensor
+    device_class: smoke
+
+  attributes:
+    alarm:
+      pairing: AL_STATE_INDICATION
+      codec: bool01
+      kind: state

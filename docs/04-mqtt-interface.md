@@ -352,6 +352,22 @@ Points that matter:
 | switch sensor / trigger / door ring | `event` | HA's `event` platform — the right fit for edges |
 | unsupported (raw mode) | `sensor` | `entity_category: diagnostic`, disabled by default |
 
+This table covers every profile class, current (tier-1, WP4) and future (tier-2/3, WP11) alike;
+`homeassistant/components.py` (WP10) implements the tier-1 rows above against the 15 profiles
+shipped so far. One deliberate narrowing versus the table's own wording: `heating_actuator` maps
+to `number`, not `valve` (a bare 0-100% actuating value with no open/close semantics fits `number`
+more directly).
+
+`room_temperature_controller`'s "modes derived by a transform" is `model/transforms.py`'s
+`RoomTemperatureControllerTransform`, wired into `bus/publisher.py` (state) and `bus/commands.py`
+(commands) as of the fix following WP10. `mode_state_template`/`mode_command_template` map this
+bridge's own `hvac_mode` vocabulary (`off`/`eco`/`heating`/`cooling`) to Home Assistant's
+`HVACMode` words (`off`/`auto`/`heat`/`cool`) at the discovery-payload boundary, never by renaming
+the vocabulary this bridge itself publishes. HA has no native "eco" HVAC mode, so it is mapped to
+HA's `auto` — a documented simplification; a proper `preset_mode` axis for it is future work.
+`room_temperature_controller_basic` has no `on_off`/`eco`/`mode` at all, so its discovery payload
+has no mode topics — there is nothing to derive one from.
+
 ### 6.3 Lifecycle
 
 - **Publish** after compile, before state, retained QoS 1.
@@ -388,8 +404,14 @@ useful middle ground, and the recommended setting for anyone filing an issue.
 - Payloads are UTF-8 JSON. `bridge/devices` may be large; see §4.3.
 - The bridge sets an MQTT client id of `freeathome2mqtt_<sysap_serial>` so two bridges against two
   SysAPs on one broker do not evict each other — a genuinely confusing failure to debug.
-- MQTT 5 is used when the broker supports it (for `maximumPacketSize` and better disconnect reason
-  codes), falling back to 3.1.1 automatically.
+- MQTT 5 is the eventual default (for `maximumPacketSize` and better disconnect reason codes),
+  falling back to 3.1.1 automatically -- **deferred** (WP5): `identifier` (a fixed client id) plus
+  `will` (the LWT) together on an MQTT 5 CONNECT hangs indefinitely with the `paho-mqtt` 2.1.0 /
+  `aiomqtt` 2.5.1 pairing this project currently pins, reproduced in isolation and independent of
+  the broker on the other end (see the comment at the top of `mqtt/client.py`). The bridge speaks
+  MQTT 3.1.1 only until that combination is fixed upstream or worked around differently.
 - After reconnect, retained messages are republished once (2 s later) for brokers that do not
-  persist retained state across restarts, then cancelled if the broker proves it did retain by
-  echoing `bridge/info` back.
+  persist retained state across restarts. The echo-based cancellation ("stop once the broker
+  proves it did retain, by echoing `bridge/info` back") is deferred to WP9, when `bridge/info`
+  exists; WP5 republishes unconditionally on every connect instead, which is simply the same fix
+  applied slightly more often than strictly necessary, not incorrect.

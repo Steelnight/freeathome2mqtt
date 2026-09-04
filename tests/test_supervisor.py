@@ -2615,3 +2615,145 @@ async def test_scene_triggered_frame_emits_a_bridge_event_and_applies_state(
         finally:
             await supervisor.stop()
             await task
+
+
+# ------------------------------------------------------------------------------- bridge/info
+
+
+async def test_bridge_info_is_published_retained_at_startup(tmp_path: Path) -> None:
+    """docs/04 §4.2: `bridge/info` is a retained QoS 1 topic carrying versions, links, counters
+    and a config summary. It was built by `_build_bridge_info` from WP8 onward but only ever
+    reachable through the `health` *response*; the topic itself was never published, which left
+    docs/06 §9's "determine what happened from `bridge/info` and the last 50 log lines" unmet.
+    """
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            topic = f"{BASE}/bridge/info"
+
+            # A late subscriber must receive it from the broker's retained store, which is the
+            # whole point of the retain flag here (docs/04 §4: "consumers expect them on connect").
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as observer:
+                await observer.subscribe(topic)
+                async with asyncio.timeout(5.0):
+                    message = await anext(aiter(observer.messages))
+
+            assert str(message.topic) == topic
+            assert message.retain is True
+            info = orjson.loads(message.payload)
+            assert set(info) == {"version", "sysap", "links", "counts", "config", "stats"}
+            assert info["sysap"]["serial"] == fake._serial_number
+            assert info["links"] == {
+                "mqtt": "connected",
+                "sysap_rest": "ok",
+                "sysap_ws": "connected",
+            }
+            assert info["counts"]["entities"] == 1
+            assert info["config"]["base_topic"] == BASE
+            assert info["stats"]["uptime_s"] >= 0.0
+        finally:
+            await supervisor.stop()
+            await task
+
+
+async def test_bridge_info_is_republished_on_the_periodic_timer(tmp_path: Path) -> None:
+    """docs/04 §4.2: "Republished on change and at most every 30 s". The 30 s cadence is what
+    keeps `stats` (uptime, counters) usable for diagnosis rather than a snapshot frozen at
+    startup; the interval is a `SupervisorConfig` field so this test can run it fast.
+    """
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client, bridge_info_interval_s=0.05),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            topic = f"{BASE}/bridge/info"
+            seen: list[float] = []
+
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as observer:
+                await observer.subscribe(topic)
+
+                async def _collect() -> None:
+                    async for message in observer.messages:
+                        seen.append(orjson.loads(message.payload)["stats"]["uptime_s"])
+
+                collector = asyncio.create_task(_collect())
+                try:
+                    await _wait_until(lambda: len(seen) >= 3, timeout_seconds=5.0)
+                finally:
+                    collector.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await collector
+
+            # Not the same retained message replayed: uptime advances across republishes.
+            assert seen[-1] > seen[0]
+        finally:
+            await supervisor.stop()
+            await task
+
+
+async def test_bridge_info_is_republished_after_a_resync(tmp_path: Path) -> None:
+    """docs/04 §4.2's "republished on change" half: a resync changes `counts` and
+    `stats.config_reloads`, and that must surface promptly rather than waiting out the timer.
+    """
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(
+                tmp_path,
+                broker.port,
+                http_client,
+                # The periodic timer is off, so anything observed here came from the resync.
+                bridge_info_interval_s=0,
+            ),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            topic = f"{BASE}/bridge/info"
+            seen: list[dict[str, Any]] = []
+
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as observer:
+                await observer.subscribe(topic)
+
+                async def _collect() -> None:
+                    async for message in observer.messages:
+                        seen.append(orjson.loads(message.payload))
+
+                collector = asyncio.create_task(_collect())
+                try:
+                    await _wait_until(lambda: len(seen) >= 1)  # the retained startup publish
+                    await supervisor._resync()
+                    await _wait_until(lambda: len(seen) >= 2, timeout_seconds=5.0)
+                finally:
+                    collector.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await collector
+
+            assert seen[0]["stats"]["config_reloads"] == 0
+            assert seen[-1]["stats"]["config_reloads"] == 1
+        finally:
+            await supervisor.stop()
+            await task

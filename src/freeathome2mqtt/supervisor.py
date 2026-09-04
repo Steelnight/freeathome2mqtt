@@ -115,6 +115,9 @@ _ESCALATION_THRESHOLD = 5
 _NEVER_RESTARTED_EXCEPTIONS = (AuthenticationError, WsAuthenticationError)
 _RAPID_FAILURE_WINDOW_S = 10.0
 
+_BRIDGE_INFO_INTERVAL_S = 30.0
+"""docs/04 §4.2: `bridge/info` is "republished on change and at most every 30 s"."""
+
 _RELOAD_DEBOUNCE_S = 2.0
 _RELOAD_MIN_INTERVAL_S = 30.0
 
@@ -471,6 +474,7 @@ class SupervisorConfig:
     availability_enabled: bool = True
     availability_per_device: bool = True
     config_refresh_interval_s: float = 300.0
+    bridge_info_interval_s: float = _BRIDGE_INFO_INTERVAL_S
     reload_debounce_s: float = _RELOAD_DEBOUNCE_S
     reload_min_interval_s: float = _RELOAD_MIN_INTERVAL_S
     link_backoff_initial: float = 1.0
@@ -537,6 +541,7 @@ class Supervisor:
         self._tg: asyncio.TaskGroup | None = None
         self._publisher_task: asyncio.Task[None] | None = None
         self._config_refresh_task: asyncio.Task[None] | None = None
+        self._bridge_info_task: asyncio.Task[None] | None = None
         self._background_tasks: set[asyncio.Task[None]] = set()
 
         self._shutdown_event = asyncio.Event()
@@ -662,6 +667,10 @@ class Supervisor:
         self._config_refresh_task = self._spawn_supervised(
             "config_refresher", self._config_refresh_loop
         )
+        # Published once here so a consumer connecting right after startup gets it retained
+        # without waiting out a whole interval, then refreshed by the loop (docs/04 §4.2).
+        await self._publish_bridge_info()
+        self._bridge_info_task = self._spawn_supervised("bridge_info", self._bridge_info_loop)
 
     def _build_mqtt_client(self, settings: SysApSettings) -> MqttClient:
         return MqttClient(
@@ -908,6 +917,42 @@ class Supervisor:
         if stale:
             await publisher.retract(stale)
 
+    async def _publish_bridge_info(self) -> None:
+        """docs/04 §4.2: `bridge/info`, retained QoS 1.
+
+        Deliberately not byte-deduplicated against the last publish. `stats.uptime_s` advances on
+        every tick, so a comparison could never skip one -- it would be a guard that cannot fire,
+        which is the very thing this file's YAGNI pass has been removing. The 30 s timer is what
+        bounds the rate ("at most every 30 s"), and `_resync` publishes out of band so a topology
+        change shows up promptly rather than up to 30 s late ("republished on change").
+        """
+        mqtt = self._mqtt
+        if mqtt is None:
+            return
+        await mqtt.publish(
+            topics.bridge_info_topic(self._config.base_topic),
+            orjson.dumps(self._build_bridge_info()),
+            qos=1,
+            retain=True,
+        )
+
+    async def _bridge_info_loop(self) -> None:
+        """Republish `bridge/info` on the docs/04 §4.2 cadence until cancelled (CLAUDE.md rule 2:
+        the exit condition is cancellation by the owning TaskGroup, exercised by the shutdown
+        tests).
+        """
+        interval = self._config.bridge_info_interval_s
+        if interval <= 0:
+            return
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await self._publish_bridge_info()
+            except MqttClientNotConnectedError:
+                # A broker blip must not kill the loop -- the next tick republishes, and the
+                # retained copy the broker already holds stays valid meanwhile.
+                logger.debug("bridge/info skipped: MQTT not connected")
+
     async def _publish_bridge_devices(self, config: Configuration, model: Model) -> None:
         """docs/04 §4.3: the retained device/channel inventory, split into indexed parts if it
         would exceed `mqtt.maximum_packet_size` (P-41) -- published sequentially, one publish
@@ -1143,6 +1188,9 @@ class Supervisor:
         await self._publish_bridge_devices(config, new_model)
 
         self.metrics.config_reloads += 1
+        # docs/04 §4.2's "republished on change": a resync moves `counts` and `config_reloads`,
+        # so refresh now instead of leaving the retained copy stale until the next timer tick.
+        await self._publish_bridge_info()
 
     async def _diff_and_apply(
         self, new_model: Model, *, mqtt: MqttClient, rest: RestClient, config: Configuration
@@ -1546,10 +1594,16 @@ class Supervisor:
             await self._mqtt.stop()
         if self._metrics_server is not None:
             await self._metrics_server.stop()
-        if self._publisher_task is not None:
-            self._publisher_task.cancel()
-        if self._config_refresh_task is not None:
-            self._config_refresh_task.cancel()
+        self._cancel_long_lived_tasks()
+
+    def _cancel_long_lived_tasks(self) -> None:
+        """Every `while True` task this supervisor owns exits by cancellation (CLAUDE.md rule 2),
+        and this is the one place that does it -- split out of `_graceful_shutdown` to keep that
+        method inside rule 4's branch budget as the set grows.
+        """
+        for task in (self._publisher_task, self._config_refresh_task, self._bridge_info_task):
+            if task is not None:
+                task.cancel()
 
     async def _best_effort_publish(self, coro: Coroutine[Any, Any, None], *, what: str) -> None:
         try:

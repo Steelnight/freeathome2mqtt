@@ -62,7 +62,13 @@ from freeathome2mqtt.homeassistant.components import DiscoveryOptions
 from freeathome2mqtt.homeassistant.discovery import DiscoveryPublisher, build_model_discovery
 from freeathome2mqtt.metrics import Metrics
 from freeathome2mqtt.metrics_server import MetricsServer
-from freeathome2mqtt.model.compiler import CompileOptions, Model
+from freeathome2mqtt.model.compiler import (
+    CompileOptions,
+    Model,
+    channel_floor_room,
+    resolve_area,
+    resolve_floorplan,
+)
 from freeathome2mqtt.model.compiler import compile as compile_model
 from freeathome2mqtt.model.entity import AttrKind, Entity
 from freeathome2mqtt.model.profiles import Profile, ProfileRegistry
@@ -159,24 +165,11 @@ def _connected_or_not(connected: bool) -> str:
 # simplification `_handle_device_refresh`'s docstring already accepts for a different corner.
 
 
-def _bd_resolve_floorplan(config: Configuration) -> dict[str, dict[str, str]]:
-    floors = config.get("floorplan", {}).get("floors", {})
-    result: dict[str, dict[str, str]] = {}
-    for floor_id, floor in floors.items():
-        rooms = floor.get("rooms") or {}  # P-14: rooms may be null, not just absent
-        result[floor_id] = {room_id: room.get("name", "") for room_id, room in rooms.items()}
-    return result
-
-
-def _bd_area(floorplan: Mapping[str, Mapping[str, str]], floor_id: str, room_id: str) -> str | None:
-    return floorplan.get(floor_id, {}).get(room_id)
-
-
 def _bd_device_area(floorplan: Mapping[str, Mapping[str, str]], device: Device) -> str | None:
     floor_id, room_id = device.get("floor"), device.get("room")
     if floor_id is None or room_id is None:
         return None
-    return _bd_area(floorplan, floor_id, room_id)
+    return resolve_area(floorplan, floor_id, room_id)
 
 
 def _bd_function_fields(channel: Channel) -> tuple[str | None, str | None]:
@@ -191,8 +184,7 @@ def _bd_function_fields(channel: Channel) -> tuple[str | None, str | None]:
 
 
 def _bd_unsupported_reason(channel: Channel, device: Device) -> str:
-    floor_id = channel.get("floor") or device.get("floor")
-    room_id = channel.get("room") or device.get("room")
+    floor_id, room_id = channel_floor_room(channel, device)
     if floor_id is None or room_id is None:
         return "no floor/room assigned (orphaned channel)"
     function_id = parse_function_id(channel.get("functionID"))
@@ -297,7 +289,7 @@ def _build_bridge_devices(
 ) -> list[dict[str, Any]]:
     """docs/04 §4.3: every device, its channels, which profile matched, and which did not."""
     devices_raw = config.get("devices", {})
-    floorplan = _bd_resolve_floorplan(config)
+    floorplan = resolve_floorplan(config)
     commands_by_entity: dict[int, set[str]] = {}
     for entity_idx, command_name in model.egress:
         commands_by_entity.setdefault(entity_idx, set()).add(command_name)

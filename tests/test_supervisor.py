@@ -1245,6 +1245,26 @@ def test_build_bridge_devices_resolves_device_level_area() -> None:
     assert devices[0]["area"] == "Living Room"
 
 
+def test_build_bridge_devices_area_agrees_with_the_compiler_for_null_rooms() -> None:
+    """`bridge/devices` and the compiled entity must resolve the *same* area (P-14).
+
+    Both used to walk the floorplan with their own byte-identical copy of the resolver, so a fix
+    to one -- P-14's "rooms may be null, not just absent" in particular -- could silently miss the
+    other, and `bridge/devices` would then report an area the entity does not actually have. They
+    now share `model.compiler.resolve_floorplan`/`resolve_area`; this pins the agreement so a
+    future re-fork gets caught.
+    """
+    config = _configuration({SERIAL: _switch_device(SERIAL)})
+    # P-14: a floor whose `rooms` is explicitly null, alongside the populated one the device uses.
+    config["floorplan"]["floors"]["02"] = {"name": "Attic", "rooms": None}
+
+    model = compile_model(config, REGISTRY, CompileOptions(topic_prefix=BASE))
+    devices = _build_bridge_devices(config, model, REGISTRY)
+
+    entity = next(e for e in model.entities if e.id == f"{SERIAL}_ch0000")
+    assert devices[0]["area"] == entity.area
+
+
 def test_build_bridge_devices_reports_unknown_function_reason() -> None:
     model = _compiled_bridge_devices_model()
     devices = _build_bridge_devices(_bridge_devices_config(), model, REGISTRY)

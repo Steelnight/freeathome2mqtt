@@ -166,7 +166,13 @@ def _identity(value: Any) -> Any:
 # --------------------------------------------------------------------------- floorplan (§4.4, P-14)
 
 
-def _resolve_floorplan(config: Configuration) -> dict[str, dict[str, str]]:
+def resolve_floorplan(config: Configuration) -> dict[str, dict[str, str]]:
+    """`{floor_id: {room_id: room_name}}` from a configuration (docs/01 §4.4).
+
+    Public because `supervisor.py`'s `bridge/devices` inventory must resolve areas exactly the
+    way the compiler did -- it previously carried a byte-identical private copy, so P-14's
+    null-`rooms` handling lived in two places that could drift apart.
+    """
     floors = config.get("floorplan", {}).get("floors", {})
     result: dict[str, dict[str, str]] = {}
     for floor_id, floor in floors.items():
@@ -175,13 +181,20 @@ def _resolve_floorplan(config: Configuration) -> dict[str, dict[str, str]]:
     return result
 
 
-def _resolve_area(
+def resolve_area(
     floorplan: Mapping[str, Mapping[str, str]], floor_id: str, room_id: str
 ) -> str | None:
+    """The room name for one `(floor_id, room_id)` pair, or `None` if the floorplan lacks it."""
     return floorplan.get(floor_id, {}).get(room_id)
 
 
-def _channel_floor_room(channel: Channel, device: Device) -> tuple[str | None, str | None]:
+def channel_floor_room(channel: Channel, device: Device) -> tuple[str | None, str | None]:
+    """A channel's effective `(floor_id, room_id)`, falling back to its device's (docs/01 §4.3).
+
+    Public for the same reason as `resolve_area`: `bridge/devices` decides whether a channel is
+    orphaned, and it must reach that verdict with the compiler's own inheritance rule rather than
+    a second copy of it.
+    """
     floor_id = channel.get("floor") or device.get("floor")
     room_id = channel.get("room") or device.get("room")
     return floor_id, room_id
@@ -326,14 +339,14 @@ def _collect_one_channel(
         ctx.tally.channels_excluded_by_option += 1
         return None
 
-    floor_id, room_id = _channel_floor_room(channel, device)
+    floor_id, room_id = channel_floor_room(channel, device)
     if floor_id is None or room_id is None:
         if not ctx.options.include_orphan_channels:
             ctx.tally.channels_orphaned += 1
             return None
         area = None
     else:
-        area = _resolve_area(ctx.floorplan, floor_id, room_id)
+        area = resolve_area(ctx.floorplan, floor_id, room_id)
 
     function = _resolve_channel_function(channel)
     if function is None:
@@ -643,7 +656,7 @@ def _build_entity(
 def compile(config: Configuration, profiles: ProfileRegistry, options: CompileOptions) -> Model:
     """Pure: config JSON + a loaded `ProfileRegistry` -> a flat, compiled `Model` (docs/03 §4)."""
     ctx = _CompileContext(
-        floorplan=_resolve_floorplan(config),
+        floorplan=resolve_floorplan(config),
         registry=profiles,
         options=options,
         tally=_Tally(),

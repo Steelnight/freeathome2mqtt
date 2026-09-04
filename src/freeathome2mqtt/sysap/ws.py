@@ -22,7 +22,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import random
 import ssl
 from collections.abc import Callable
 from typing import Any, cast
@@ -31,19 +30,10 @@ import aiohttp
 import orjson
 from aiohttp import WSMsgType
 
+from freeathome2mqtt.backoff import backoff_delay
 from freeathome2mqtt.sysap.schema import WsFrameBody
 
 logger = logging.getLogger(__name__)
-
-
-def _backoff_delay(attempt: int, *, initial: float, factor: float, cap: float) -> float:
-    """Full jitter (docs/06 §3): ``sleep = random(0, min(cap, initial * factor**(attempt-1)))``.
-
-    Duplicated from sysap/rest.py's identical helper rather than shared, per CLAUDE.md's "three
-    similar lines beats a premature abstraction" -- both call sites are three lines of pure math.
-    """
-    ceiling = min(cap, initial * factor ** (attempt - 1))
-    return random.uniform(0, ceiling)  # noqa: S311 -- timing jitter, not a cryptographic use
 
 
 class WsBufferOverflowError(Exception):
@@ -183,7 +173,7 @@ class WsReader:
             await self._ws.close()
 
     async def _sleep_backoff(self, attempt: int) -> None:
-        delay = _backoff_delay(
+        delay = backoff_delay(
             attempt,
             initial=self._backoff_initial,
             factor=self._backoff_factor,

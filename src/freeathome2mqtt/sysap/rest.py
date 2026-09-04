@@ -12,13 +12,14 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-import random
 import ssl
 from pathlib import Path
 from typing import Any, Literal
 
 import aiohttp
 import orjson
+
+from freeathome2mqtt.backoff import backoff_delay
 
 logger = logging.getLogger(__name__)
 
@@ -124,12 +125,6 @@ class AdaptiveLimiter:
             if self._limit < self._max:
                 self._limit += 1
                 self._condition.notify_all()
-
-
-def _backoff_delay(attempt: int, *, initial: float, factor: float, cap: float) -> float:
-    """Full jitter (docs/06 §3): ``sleep = random(0, min(cap, initial * factor**(attempt-1)))``."""
-    ceiling = min(cap, initial * factor ** (attempt - 1))
-    return random.uniform(0, ceiling)  # noqa: S311 -- timing jitter, not a cryptographic use
 
 
 _HTTP_BAD_REQUEST = 400
@@ -261,7 +256,7 @@ class RestClient:
 
     async def _sleep_backoff(self, attempt: int) -> None:
         await asyncio.sleep(
-            _backoff_delay(
+            backoff_delay(
                 attempt,
                 initial=self._backoff_initial,
                 factor=self._backoff_factor,

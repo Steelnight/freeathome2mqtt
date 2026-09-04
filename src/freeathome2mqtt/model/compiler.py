@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from itertools import chain
 from typing import Any, Literal
 
+from freeathome2mqtt.log import log_once
 from freeathome2mqtt.model.codecs import Codec, build_codec
 from freeathome2mqtt.model.entity import (
     AttributeSpec,
@@ -236,14 +237,21 @@ def _resolve_channel_function(channel: Channel) -> Function | None:
 def _log_unknown_function_once(
     raw: str | None, device_serial: str, device: Device, ctx: _CompileContext
 ) -> None:
-    if raw in ctx.seen_unknown_function_ids:
-        return
-    ctx.seen_unknown_function_ids.add(raw)
-    logger.info(
-        "unsupported function ID %r on device %s (article %s)",
+    """docs/06 §9's log-storm guard: one line per distinct unknown function ID, not per channel.
+
+    `ctx.seen_unknown_function_ids` is scoped to a single `compile()` call, so the set stays
+    bounded by the installation's function-ID space rather than by process lifetime (CLAUDE.md
+    rule 3) -- exactly the ownership `log_once` documents for its `seen` argument.
+    """
+    log_once(
+        ctx.seen_unknown_function_ids,
         raw,
-        device_serial,
-        device.get("articleNumber", "?"),
+        lambda: logger.info(
+            "unsupported function ID %r on device %s (article %s)",
+            raw,
+            device_serial,
+            device.get("articleNumber", "?"),
+        ),
     )
 
 

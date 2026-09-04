@@ -117,6 +117,7 @@ src/freeathome2mqtt/
 │   └── components.py           # profile -> HA component mapping tables
 │
 ├── availability.py             # bridge + per-device availability (ADR-008)
+├── backoff.py                  # the one full-jitter delay every retrying link shares (docs/06 §3)
 ├── persistence.py              # entities.json, config cache, atomic writes
 ├── metrics.py                  # counters/histograms -> bridge/info + optional Prometheus
 └── tools/
@@ -134,6 +135,10 @@ Rules the layout enforces:
   tables deterministically. That makes the compiler exhaustively testable from fixtures, which is
   where most correctness risk lives.
 - **`profiles/` contains no code.**
+- **One backoff policy, in `backoff.py`.** docs/06 §3 defines a single full-jitter formula and
+  then tabulates per-link constants; `sysap/rest.py`, `sysap/ws.py`, `mqtt/client.py` and
+  `supervisor.py` all call the same `backoff_delay()` and differ only in the constants they pass,
+  so the policy cannot drift between links.
 
 ## 3. Concurrency model
 

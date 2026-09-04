@@ -37,7 +37,6 @@ import dataclasses
 import hashlib
 import importlib.metadata
 import logging
-import random
 import ssl as ssl_module
 import time
 from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
@@ -51,6 +50,7 @@ import orjson
 
 from freeathome2mqtt import log
 from freeathome2mqtt.availability import BridgeAvailability, DeviceAvailabilityPublisher
+from freeathome2mqtt.backoff import backoff_delay
 from freeathome2mqtt.bus.commands import CommandDispatcher
 from freeathome2mqtt.bus.events import EventPublisher
 from freeathome2mqtt.bus.ingress import Ingress
@@ -132,12 +132,6 @@ _RETRYABLE_CONFIG_FETCH_ERRORS = (SysApError, aiohttp.ClientError, TimeoutError)
 
 class TaskDiedTooManyTimesError(Exception):
     """A supervised task failed `_ESCALATION_THRESHOLD` times in a row (docs/02 §3.1; P-29)."""
-
-
-def _backoff_delay(attempt: int, *, initial: float, factor: float, cap: float) -> float:
-    """Full jitter (docs/06 §3): ``sleep = random(0, min(cap, initial * factor**(attempt-1)))``."""
-    ceiling = min(cap, initial * factor ** (attempt - 1))
-    return random.uniform(0, ceiling)  # noqa: S311 -- timing jitter, not a cryptographic use
 
 
 def _hash_config(config: Configuration) -> bytes:
@@ -391,7 +385,7 @@ async def restart_on_failure(
             if attempt >= _ESCALATION_THRESHOLD:
                 raise TaskDiedTooManyTimesError(name) from None
             await sleep(
-                _backoff_delay(
+                backoff_delay(
                     attempt,
                     initial=_RESTART_BACKOFF_INITIAL,
                     factor=_RESTART_BACKOFF_FACTOR,
@@ -523,10 +517,7 @@ class Supervisor:
         self._model: Model | None = None
         self._state: StateStore | None = None
         self._ingress: Ingress | None = None
-        self._events: EventPublisher | None = None
         self._publisher: Publisher | None = None
-        self._rate_limiter: RateLimiter | None = None
-        self._reconciler: Reconciler | None = None
         self._commands: CommandDispatcher | None = None
         self._raw_commands: RawCommandHandler | None = None
         self._device_availability: DeviceAvailabilityPublisher | None = None
@@ -902,7 +893,7 @@ class Supervisor:
                 attempt += 1
                 logger.warning("configuration fetch failed (attempt %d): %s", attempt, exc)
                 await asyncio.sleep(
-                    _backoff_delay(
+                    backoff_delay(
                         attempt,
                         initial=_CONFIG_FETCH_BACKOFF_INITIAL,
                         factor=_RESTART_BACKOFF_FACTOR,
@@ -986,7 +977,6 @@ class Supervisor:
         )
         self._model = model
         self._state = state
-        self._events = events
         self._ingress = Ingress(
             entities=model.entities,
             ingress_table=model.ingress,
@@ -1003,8 +993,6 @@ class Supervisor:
             publish_last_changed=self._config.publish_last_changed,
             qos_state=self._config.mqtt_qos_state,
         )
-        self._rate_limiter = rate_limiter
-        self._reconciler = reconciler
         self._commands = CommandDispatcher(
             entities=model.entities,
             egress=model.egress,

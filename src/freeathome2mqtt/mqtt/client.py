@@ -17,27 +17,17 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import random
 from collections.abc import Awaitable, Callable
 from ssl import SSLContext
 
 import aiomqtt
 
+from freeathome2mqtt.backoff import backoff_delay
 from freeathome2mqtt.mqtt import topics
 
 logger = logging.getLogger(__name__)
 
 OnMessage = Callable[[aiomqtt.Message], None]
-
-
-def _backoff_delay(attempt: int, *, initial: float, factor: float, cap: float) -> float:
-    """Full jitter (docs/06 §3): ``sleep = random(0, min(cap, initial * factor**(attempt-1)))``.
-
-    Duplicated from `sysap/ws.py`'s identical helper rather than shared, per CLAUDE.md's "three
-    similar lines beats a premature abstraction" -- both call sites are three lines of pure math.
-    """
-    ceiling = min(cap, initial * factor ** (attempt - 1))
-    return random.uniform(0, ceiling)  # noqa: S311 -- timing jitter, not a cryptographic use
 
 
 class MqttClientNotConnectedError(Exception):
@@ -72,7 +62,6 @@ class MqttClient:
     ) -> None:
         self._host = host
         self._port = port
-        self._base_topic = base_topic
         # P-43: a fixed client id keyed on the SysAP serial is the default so two bridges never
         # collide; `client_id` overrides it for deployments that need one they control directly
         # (e.g. a broker ACL keyed on client id).
@@ -179,7 +168,7 @@ class MqttClient:
             self._retained_topics.discard(topic)
 
     async def _sleep_backoff(self, attempt: int) -> None:
-        delay = _backoff_delay(
+        delay = backoff_delay(
             attempt,
             initial=self._backoff_initial,
             factor=self._backoff_factor,

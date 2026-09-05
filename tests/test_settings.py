@@ -4,12 +4,17 @@ validation, and the Settings -> SupervisorConfig translation (docs/07; docs/11 W
 
 from __future__ import annotations
 
+import inspect
+import re
 import ssl
 from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import BaseModel
 
+import freeathome2mqtt.cli
+import freeathome2mqtt.settings
 from freeathome2mqtt.settings import (
     Settings,
     SettingsError,
@@ -545,3 +550,249 @@ def test_valid_max_inflight_base_topic_and_coalesce_ms_are_accepted(tmp_path: Pa
     assert settings.sysap.max_inflight == 8
     assert settings.mqtt.base_topic == "my_custom_topic"
     assert settings.performance.coalesce_ms == 100
+
+
+# ---------------------------------------------------- WP16: knobs that used to be accepted-inert
+
+
+# A throwaway self-signed client certificate + key, generated for this test alone. Not a secret:
+# it exists so `ssl.SSLContext.load_cert_chain` has something real to load, which is the only way
+# to prove `mqtt.cert`/`mqtt.key` actually reach a context rather than being accepted and dropped.
+_TEST_CLIENT_CERT_PEM = """-----BEGIN CERTIFICATE-----
+MIIDLTCCAhWgAwIBAgIUFTdE65Lw6agdKNEVoxTylquZlsQwDQYJKoZIhvcNAQEL
+BQAwJjEkMCIGA1UEAwwbZnJlZWF0aG9tZTJtcXR0LXRlc3QtY2xpZW50MB4XDTI2
+MDkwNTA3NDEyM1oXDTM2MDkwMjA3NDEyM1owJjEkMCIGA1UEAwwbZnJlZWF0aG9t
+ZTJtcXR0LXRlc3QtY2xpZW50MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKC
+AQEAnprrg5fpz7l1hRmjxN1VnI73M4zyIY8evXVPwLfpLKgb6fW8a2ikbxYwpm1w
+KIGfxOVyBRzfS69A4cyc6Uva0pT83ld+YrSjS1wXLFJQBjbOBHskK3b27DdXlKJr
+AkbKfj5jgq2I+3mq8UGn4KIc3GuqDy6CNXDLdAcVkvGNssq51Ql6fb1cA/NrNNzd
+ABs/wuqI0agqm7Cz5dsREbBKrauJqPUfbGus+dvEvzyl7dWzj73K+J/AHDQ+sp5y
+YAykxFfWSgMYbvVxGtWCF+9Dr+kCDO7eHQoT8bBuWweoINcR7/xzIpJ0Ya1mo+Ux
+T7eOgoNl99IwLAtdJBSsVioWJwIDAQABo1MwUTAdBgNVHQ4EFgQUt7v+huSBrVn1
+fscDBQr8IhOqUtEwHwYDVR0jBBgwFoAUt7v+huSBrVn1fscDBQr8IhOqUtEwDwYD
+VR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAAD0Z+Fwm4yUAkweWj7nv
+oW1gPAGlAgUtrxrKfCwP6EsV/7grJrvb463molfCbhUztVychr514F3hPFfGfUca
+x7yBAn7KgSPZlQ6Za4/yK4j8A/5B/OXbpCwDo/ooEd11MPml5Tl3Sy/2JFk42/5x
++EvzNcYUILyD3LRddR1Hd+I+X1ALGs4GZ5ajRGSehFe9fi+K/ATDwTSOy+NHJgcN
+/evFEF2jYMo0ZbgjhjineQ9Q/0QOUpvTFecIvZxWBlu10PQFXhVZpVp8w9MDNcGM
+0Am2YBWQ503cIkm9hS4Md7eGs/np2pdqLHEFX9Qgekats7YY8yGx4tIZREG7Lsvj
+/A==
+-----END CERTIFICATE-----
+"""
+
+_TEST_CLIENT_KEY_PEM = """-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCemuuDl+nPuXWF
+GaPE3VWcjvczjPIhjx69dU/At+ksqBvp9bxraKRvFjCmbXAogZ/E5XIFHN9Lr0Dh
+zJzpS9rSlPzeV35itKNLXBcsUlAGNs4EeyQrdvbsN1eUomsCRsp+PmOCrYj7earx
+Qafgohzca6oPLoI1cMt0BxWS8Y2yyrnVCXp9vVwD82s03N0AGz/C6ojRqCqbsLPl
+2xERsEqtq4mo9R9sa6z528S/PKXt1bOPvcr4n8AcND6ynnJgDKTEV9ZKAxhu9XEa
+1YIX70Ov6QIM7t4dChPxsG5bB6gg1xHv/HMiknRhrWaj5TFPt46Cg2X30jAsC10k
+FKxWKhYnAgMBAAECggEARATYgAUEZut4dO58B4+MianeZiNKLA4+9q162IGG5Hns
+DrguaDnmWyW/E4DXmueMZ1qnPX4WXVT5lFy15m97ltgCYjBPqXEins0NuxpJ64BR
+diaBaoqIduF9E+db0QwfB2kmMALQPlj9cJ3hqzqa+gTKV9xwRw7qkgX/wJcLV+Nf
+wtfWxmmqMAoUrnavHkpfrUWhXCohRZdcp7EEOQoBOucNG6ukEobpF1cGccLx49AF
+GvcKlKYwjZbyT9vSMJpcSndatlFcktIYCrTQqbmFSCVhLfJB47nEQ+U6g1QOswg2
+uJ5aWQPVt0JEkEOIootERj4NABsef1XzI77gb/zwcQKBgQDbEzQiWFPI2OhFh86y
+4RFIFgL8yYQ32nI5VoMl9Zwuq1Ct7nn9dbRgMK68zW8W4Bf5O4ymR9zV59PdTJ6U
+Ch1ir/ntgj0Dh2CsF9p99PA6q+Wf4/vqD0MKJ05JjPUaKcpbj5TcRuxZ7YFYuMZX
+Gjgtuyp58reUaP+ZDm/T2E29IwKBgQC5VoWq8GEikrZuxl06oozfk++FKnvQEpzN
+hxN167quUWBqEUuSMhNQ9IfcmYe4DXymNWeBmUXh4a1PiedLLUm7ipQcktXQFH9g
+ELnzoJ4FmA4Ci98B6rtJ3KjNhgB3DoEn9/n4ZXBNeA1qWGuOD+9+o/MBkaUkLtk/
+H42+wv+9LQKBgQCxfNV4HeeDiXhlHKox8nZ12J+C/iDIv4pbOeP3FQ38IX+z6sma
+t4nzhH2NKUMfXV8O5VgGP6KDCtdzK2guuCMmmTv7WNDl0wBXbNvvwEoAvtPCvoqS
+DttZlo6uuCy7jbAMjj8kV7GVCf8JSmoml298XW8EbcidzJOIBVJEZ7JT0QKBgFzF
+r5EaVDT/JWybxK0GEugTYBDTbDiCKJVEqPwc7Ew3lcBiOebLRBoA3UUSYPpDXgLA
+trgLpgxkb+FhkTJzT/YdbvhCk95ddEj89me6HX+FVnX118JY4jkdyC1ghzkRPJtq
+KGkrNaTBlE2IRwZMecB1hr1hTz2mab6MJ+K2L1ddAoGAWpgLDxUmwzPV0Dafnx8X
+5uhxIiD+HhjKcRESYBYxBxwxR7r6rYq9heYzAIzB8f4S7Oj9DRSrU/EDMicPoSp7
+kFWAyin6a2yYJzBwZwjLaso2NZqWvqBJyBMk2GzwN7UHhrAklTCLuFi8478GzNmv
+3CVwcOEt635+vXb6Qrk/9zk=
+-----END PRIVATE KEY-----
+"""
+
+
+def _config_with_mqtt_keys(extra: str) -> str:
+    """MINIMAL_CONFIG with extra keys folded into its *existing* `mqtt:` block.
+
+    Appending a second `mqtt:` section would be valid YAML and quietly wrong: duplicate top-level
+    keys mean last-wins, so the required `server` would vanish -- the same trap docs/07 §2's own
+    listing warns about.
+    """
+    return MINIMAL_CONFIG.replace(
+        "  server: mqtt://192.168.1.10:1883", "  server: mqtt://192.168.1.10:1883\n" + extra
+    )
+
+
+def _client_certificate(tmp_path: Path) -> tuple[Path, Path]:
+    cert_path = tmp_path / "client.crt"
+    key_path = tmp_path / "client.key"
+    cert_path.write_text(_TEST_CLIENT_CERT_PEM)
+    key_path.write_text(_TEST_CLIENT_KEY_PEM)
+    return cert_path, key_path
+
+
+async def test_entity_exclude_and_include_reach_compile_options(tmp_path: Path) -> None:
+    """`entities.exclude`/`include` (docs/07 §2): accepted and validated since WP9, and silently
+    doing nothing until WP16.
+    """
+    path = _write(
+        tmp_path,
+        MINIMAL_CONFIG
+        + """
+entities:
+  exclude: ["ABB1_*", "ABB2_ch0003"]
+  include: ["ABB*"]
+""",
+    )
+    config = await settings_to_supervisor_config(load_settings(path, environ={}))
+
+    assert config.compile_options.exclude_patterns == ("ABB1_*", "ABB2_ch0003")
+    assert config.compile_options.include_patterns == ("ABB*",)
+
+
+async def test_stale_after_reaches_the_supervisor_config(tmp_path: Path) -> None:
+    path = _write(tmp_path, MINIMAL_CONFIG + "\navailability:\n  stale_after: 3600\n")
+    config = await settings_to_supervisor_config(load_settings(path, environ={}))
+    assert config.stale_after_s == 3600
+
+
+async def test_stale_after_defaults_to_disabled(tmp_path: Path) -> None:
+    path = _write(tmp_path, MINIMAL_CONFIG)
+    config = await settings_to_supervisor_config(load_settings(path, environ={}))
+    assert config.stale_after_s is None
+
+
+async def test_log_to_mqtt_reaches_the_supervisor_config(tmp_path: Path) -> None:
+    path = _write(tmp_path, MINIMAL_CONFIG + "\nadvanced:\n  log_to_mqtt: true\n")
+    config = await settings_to_supervisor_config(load_settings(path, environ={}))
+    assert config.log_to_mqtt is True
+
+
+async def test_mqtt_client_certificate_is_loaded(tmp_path: Path) -> None:
+    """`mqtt.cert`/`mqtt.key` were accepted and validated but never plumbed into an SSL context --
+    named in `settings._build_mqtt_tls`'s own docstring as a real gap.
+    """
+    ca_path = tmp_path / "ca.crt"
+    ca_path.write_text(_TEST_CA_PEM)
+    cert_path, key_path = _client_certificate(tmp_path)
+    path = _write(
+        tmp_path,
+        _config_with_mqtt_keys(f"  ca: {ca_path}\n  cert: {cert_path}\n  key: {key_path}\n"),
+    )
+
+    config = await settings_to_supervisor_config(load_settings(path, environ={}))
+
+    assert config.mqtt_tls is not None
+    # A context with a loaded chain reports it here; one without raises or reports nothing.
+    loaded = config.mqtt_tls.get_ca_certs()
+    assert loaded is not None
+    assert config.mqtt_tls.cert_store_stats()["x509"] >= 1
+
+
+async def test_a_client_certificate_without_its_key_is_rejected_at_load(tmp_path: Path) -> None:
+    """Half a client certificate is a misconfiguration that must fail loudly at load time
+    (docs/07 §1: fatal, with a precise field path), not at the first connect attempt.
+    """
+    cert_path, _key_path = _client_certificate(tmp_path)
+    path = _write(tmp_path, _config_with_mqtt_keys(f"  cert: {cert_path}\n"))
+
+    with pytest.raises(SettingsError, match=re.escape("mqtt.key")):
+        load_settings(path, environ={})
+
+
+async def test_a_key_without_its_certificate_is_rejected_at_load(tmp_path: Path) -> None:
+    _cert_path, key_path = _client_certificate(tmp_path)
+    path = _write(tmp_path, _config_with_mqtt_keys(f"  key: {key_path}\n"))
+
+    with pytest.raises(SettingsError, match=re.escape("mqtt.cert")):
+        load_settings(path, environ={})
+
+
+# ------------------------------------------------------- WP16: the meta-test (docs/12 WP16)
+
+
+# Knobs that `config.yaml` accepts and validates but that nothing acts on yet. Each entry must
+# carry a reason. This list is the whole point of `test_no_silently_inert_settings`: the same
+# defect has now been found three times (WP9's own docstring named five, the post-WP12 YAGNI pass
+# found seven more, WP16 found four), always by someone reading code rather than by a test. An
+# entry here is a deliberate, reviewed decision; a knob *missing* from both here and the wiring
+# is the bug.
+DELIBERATELY_INERT: dict[str, str] = {
+    "mqtt.version": (
+        "MQTT 3.1.1 only -- identifier+will on an MQTT 5 CONNECT hangs with the pinned "
+        "paho-mqtt/aiomqtt pair (docs/04 §8, mqtt/client.py's docstring)"
+    ),
+    "homeassistant.legacy_entity_attributes": (
+        "its payload shape is not specified anywhere in docs/04 §6; specifying or deleting it is "
+        "an open decision (docs/12 §10.2)"
+    ),
+    "advanced.cache_config": (
+        "the configuration cache is a measurement-gated decision, not yet taken (docs/12 §7.2)"
+    ),
+    "performance.coalesce_adaptive": "adaptive coalescing (docs/12 §7.1)",
+    "performance.coalesce_max_ms": "adaptive coalescing (docs/12 §7.1)",
+    "performance.coalesce_burst_threshold": "adaptive coalescing (docs/12 §7.1)",
+    "sysap.reconnect.jitter": (
+        "the two link implementations use a fixed full-jitter policy (docs/06 §3); making the "
+        "fraction configurable would mean threading it through both, and nothing has asked"
+    ),
+}
+
+# Where a knob may legitimately be consumed. Not every setting reaches `SupervisorConfig`: the
+# logging ones are applied before a Supervisor exists at all (secrets must be redacted from the
+# first line, P-45) and `profiles_dir` is read while building the registry the Supervisor is
+# handed. Listing the modules explicitly is what keeps "wired somewhere else" from becoming an
+# excuse that hides a genuinely dropped knob.
+_CONSUMER_MODULES = (freeathome2mqtt.settings, freeathome2mqtt.cli)
+
+
+def _leaf_setting_names(model: type[BaseModel], prefix: str = "") -> list[str]:
+    """Every leaf field in the `Settings` tree, as dotted paths (`mqtt.qos_state`)."""
+    names: list[str] = []
+    for field_name, field in model.model_fields.items():
+        path = f"{prefix}{field_name}"
+        annotation = field.annotation
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            names.extend(_leaf_setting_names(annotation, prefix=f"{path}."))
+        else:
+            names.append(path)
+    return names
+
+
+def test_no_silently_inert_settings() -> None:
+    """Every documented `config.yaml` knob either reaches the runtime or is listed as knowingly
+    inert with a reason (docs/12 WP16).
+
+    This is the durable half of WP16. Wiring the four knobs it found is a one-off; making it
+    impossible to *add* an inert one by accident is what stops the defect recurring. The check is
+    deliberately crude -- it looks for the field name in the translator's source -- because a
+    precise one would need to model what "wired" means, and crude-but-honest catches the actual
+    failure (a knob nobody ever mentions again) while a reviewer catches the rest.
+    """
+    sources = [inspect.getsource(module) for module in _CONSUMER_MODULES]
+
+    unwired: list[str] = []
+    for path in _leaf_setting_names(Settings):
+        if path in DELIBERATELY_INERT:
+            continue
+        leaf = path.rsplit(".", 1)[-1]
+        if not any(f".{leaf}" in source for source in sources):
+            unwired.append(path)
+
+    assert not unwired, (
+        "these config.yaml knobs are accepted and validated but nothing reads them: "
+        f"{sorted(unwired)}. Wire them, or add them to DELIBERATELY_INERT with a reason."
+    )
+
+
+def test_deliberately_inert_entries_are_real_settings() -> None:
+    """The allowlist must not rot: an entry for a knob that no longer exists would silently
+    excuse a *different* knob from the check above the day someone renames one.
+    """
+    known = set(_leaf_setting_names(Settings))
+    stale = sorted(set(DELIBERATELY_INERT) - known)
+    assert not stale, f"DELIBERATELY_INERT names settings that no longer exist: {stale}"
+
+
+def test_every_inert_entry_carries_a_reason() -> None:
+    assert all(reason.strip() for reason in DELIBERATELY_INERT.values())

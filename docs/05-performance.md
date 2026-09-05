@@ -70,6 +70,17 @@ The WebSocket datapoint key is used *verbatim* as a dict key. No `split`, `rspli
 `startswith`, f-string or `format()` between frame receipt and state update. Everything that needs
 parsing was parsed at compile time.
 
+*One bounded exemption, added with `scenesTriggered` handling (WP15).* A scene frame does not
+carry ready-made datapoint keys: its shape is `sceneSerial → channels → outputs`
+([`docs/01 §5.1`](01-freeathome-api.md#51-frame-schema)), so the composite key is rebuilt with one
+f-string per scene *output*. That cost is bounded by an event that happens when somebody presses a
+scene button — [§4](00-overview-and-decisions.md#4-scale-assumptions) puts scene bursts at 50–200
+frames as an occasional burst, not a sustained rate — and it never touches the steady-state
+datapoint path. The alternative, a second compile-time ingress table keyed by
+`(serial, channel, odp)` tuples, was rejected: a whole additional lookup structure sized with the
+installation, for a rare path, does not clear rule 3's bar for a new collection. Recorded here
+rather than taken silently.
+
 **R3 — No `O(n)` scans per event.**
 Never iterate a channel's outputs to find a pairing, never iterate entities to find a match. Every
 lookup on the hot path is a dict hit or a list index.
@@ -220,7 +231,7 @@ implementing agent copying reference code recognises them.
 | `refresh_state()` doing one HTTP GET per datapoint per channel | `local-abbfreeathome` | Thousands of requests; minutes; can take the SysAP down | One config fetch + diff ([ADR-007](00-overview-and-decisions.md#adr-007)) |
 | `if pairingID == X: elif == Y: ...` chains per event | `local-abbfreeathome` | `O(pairings)` per datapoint, plus `.get()` allocations | Compiled `Binding` ([ADR-004](00-overview-and-decisions.md#adr-004)) |
 | Subscribe `base/#`, filter own publishes via a Set | `zigbee2mqtt` | Doubles broker traffic; unbounded memory; swallows legitimate messages | Narrow subscriptions ([ADR-006](00-overview-and-decisions.md#adr-006)) |
-| Handling only `datapoints` from the WS frame | both | Device add/remove/rename invisible until restart | Handle all frame keys ([`docs/01 §5.1`](01-freeathome-api.md#51-frame-schema)) |
+| Handling only `datapoints` from the WS frame | both | Device add/remove/rename invisible until restart; a triggered scene silently lost | Handle all frame keys ([`docs/01 §5.1`](01-freeathome-api.md#51-frame-schema)) — all six, `scenesTriggered` included, as of WP15 |
 | Fetching config *before* connecting the WS | both | Silent permanent loss of changes in the gap | Connect + buffer first ([`docs/02 §7`](02-architecture.md#7-startup-order)) |
 | Fixed 5 s retry with no backoff or jitter | `local-abbfreeathome` | Reconnect storms against a rebooting SysAP | Exponential backoff + jitter ([`docs/06 §3`](06-resilience.md#3-backoff-policy)) |
 | A property getter per attribute, re-read by callbacks | `local-abbfreeathome` | Indirection per access; callee re-derives what the caller already knew | Positional slots; pass the changed value |

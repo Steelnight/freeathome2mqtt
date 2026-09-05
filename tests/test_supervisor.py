@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import inspect
 import logging
 import time
@@ -19,6 +20,7 @@ import pytest
 
 from fakes.fake_broker import free_port, running_fake_broker
 from fakes.fake_sysap import FakeSysAp, running_fake_sysap
+from freeathome2mqtt.log import MqttLogHandler
 from freeathome2mqtt.metrics import LatencyHistogram, Metrics
 from freeathome2mqtt.model.compiler import CompileOptions, CompileStats, Model
 from freeathome2mqtt.model.compiler import compile as compile_model
@@ -2592,3 +2594,107 @@ async def test_dry_run_picks_up_a_persisted_alias(tmp_path: Path) -> None:
         model = await supervisor.dry_run()
         idx = model.by_id[f"{SERIAL}_ch0000"]
         assert model.entities[idx].state_topic == f"{BASE}/kitchen_light"
+
+
+# ---------------------------------------------------- WP16: stale_after and log_to_mqtt wiring
+
+
+async def test_bridge_info_reports_the_stale_entity_count_when_configured(tmp_path: Path) -> None:
+    """docs/06 §5.3: `availability.stale_after` counts entities that have not changed in that
+    long, and reports the number in `bridge/info`. Accepted and validated since WP9; inert until
+    WP16 because it needed new per-entity state, not just wiring.
+    """
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        config = dataclasses.replace(_config(tmp_path, broker.port, http_client), stale_after_s=0.0)
+        supervisor = Supervisor(config=config, profiles=REGISTRY, http_session=http_client.session)
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            info = supervisor._build_bridge_info()
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+    # stale_after 0 means "everything counts as stale", which is the cheapest way to prove the
+    # counter is actually computed from live state rather than hardcoded.
+    assert info["counts"]["stale_entities"] == info["counts"]["entities"]
+
+
+async def test_bridge_info_omits_the_stale_count_when_stale_after_is_disabled(
+    tmp_path: Path,
+) -> None:
+    """Disabled is the default. Reporting `0` would be indistinguishable from "measured, none
+    stale", so the key is absent instead."""
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            info = supervisor._build_bridge_info()
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+    assert "stale_entities" not in info["counts"]
+
+
+async def test_log_to_mqtt_attaches_a_handler_on_connect_and_detaches_on_shutdown(
+    tmp_path: Path,
+) -> None:
+    """`advanced.log_to_mqtt` was the one gap `cli.py`'s docstring named: `MqttLogHandler` was
+    implemented and tested standalone, but `Supervisor` exposed no hook to attach it once its
+    `MqttClient` existed and detach it before shutdown.
+    """
+    root = logging.getLogger()
+    handlers_before = list(root.handlers)
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        config = dataclasses.replace(_config(tmp_path, broker.port, http_client), log_to_mqtt=True)
+        supervisor = Supervisor(config=config, profiles=REGISTRY, http_session=http_client.session)
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            attached = [h for h in root.handlers if isinstance(h, MqttLogHandler)]
+            assert len(attached) == 1
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+    assert [h for h in root.handlers if isinstance(h, MqttLogHandler)] == []
+    assert root.handlers == handlers_before
+
+
+async def test_log_to_mqtt_off_by_default_attaches_nothing(tmp_path: Path) -> None:
+    root = logging.getLogger()
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            assert [h for h in root.handlers if isinstance(h, MqttLogHandler)] == []
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)

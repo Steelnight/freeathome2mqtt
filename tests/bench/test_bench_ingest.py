@@ -172,7 +172,7 @@ async def _run_sustained_ingest() -> tuple[int, Metrics, StateStore, float]:
             entities=entities,
             ingress_table=_ingress_table(),
             state=state,
-            events=EventPublisher(mqtt=client),
+            events=EventPublisher(mqtt=client, base_topic=BASE),
             metrics=metrics,
         )
         publisher = Publisher(

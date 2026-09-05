@@ -827,3 +827,86 @@ def test_compile_nasty_fixture_is_deterministic() -> None:
     model_b = compile(copy.deepcopy(config), _switch_registry(), CompileOptions())
     assert [e.id for e in model_a.entities] == [e.id for e in model_b.entities]
     assert model_a.stats == model_b.stats
+
+
+# ------------------------------------- WP16: entities.exclude / entities.include (docs/07 §2)
+
+
+def _two_switches() -> dict[str, Any]:
+    return _config(
+        {
+            "ABB700990001": _device({"ch0000": _switch_channel()}),
+            "ABB700990002": _device({"ch0000": _switch_channel()}),
+        }
+    )
+
+
+def test_exclude_patterns_drop_matching_entities() -> None:
+    """`entities.exclude` (docs/07 §2) -- accepted and validated since WP9, enforced from WP16."""
+    model = compile(
+        _two_switches(),
+        _switch_registry(),
+        CompileOptions(exclude_patterns=("ABB700990002_*",)),
+    )
+    assert [e.id for e in model.entities] == ["ABB700990001_ch0000"]
+
+
+def test_exclude_matches_an_exact_id_without_wildcards() -> None:
+    model = compile(
+        _two_switches(),
+        _switch_registry(),
+        CompileOptions(exclude_patterns=("ABB700990001_ch0000",)),
+    )
+    assert [e.id for e in model.entities] == ["ABB700990002_ch0000"]
+
+
+def test_include_is_an_allowlist_applied_after_exclude() -> None:
+    """docs/07 §2: "if non-empty, an allowlist applied after exclude"."""
+    model = compile(
+        _two_switches(),
+        _switch_registry(),
+        CompileOptions(include_patterns=("ABB700990001_*",)),
+    )
+    assert [e.id for e in model.entities] == ["ABB700990001_ch0000"]
+
+
+def test_exclude_wins_over_include_for_the_same_entity() -> None:
+    """ "Applied after exclude" settles the overlap: an entity named by both is excluded."""
+    model = compile(
+        _two_switches(),
+        _switch_registry(),
+        CompileOptions(exclude_patterns=("ABB700990001_*",), include_patterns=("ABB70099*",)),
+    )
+    assert [e.id for e in model.entities] == ["ABB700990002_ch0000"]
+
+
+def test_an_empty_include_list_excludes_nothing() -> None:
+    """The empty-allowlist trap: `include: []` is the *default*, and must not mean "allow none"."""
+    model = compile(_two_switches(), _switch_registry(), CompileOptions(include_patterns=()))
+    assert len(model.entities) == 2
+
+
+def test_pattern_excluded_channels_are_tallied_like_other_option_exclusions() -> None:
+    """docs/03 §3.4: exclusions are counted so `bridge/info` can show them, never silent."""
+    model = compile(
+        _two_switches(),
+        _switch_registry(),
+        CompileOptions(exclude_patterns=("ABB700990002_*",)),
+    )
+    assert model.stats.channels_excluded_by_option == 1
+
+
+def test_exclude_patterns_match_the_stable_id_not_the_renameable_topic() -> None:
+    """Patterns match the entity id (docs/07 §2: "entity ids or glob patterns"), deliberately.
+
+    The topic segment is a slugified friendly name that `bridge/request/entity/rename` can change
+    at runtime (ADR-010); the id never changes. Matching topics would mean a rename could silently
+    add or drop an entity from the exclusion set, which is exactly the failure ADR-010 introduced
+    stable ids to avoid.
+    """
+    model = compile(
+        _two_switches(),
+        _switch_registry(),
+        CompileOptions(exclude_patterns=("*deckenlicht*",)),
+    )
+    assert len(model.entities) == 2

@@ -484,6 +484,9 @@ class SupervisorConfig:
     grace_seconds: float = 10.0
     availability_enabled: bool = True
     availability_per_device: bool = True
+    # docs/06 §5.3: informational only, never wired to availability -- many free@home channels
+    # legitimately never change for months, and marking those unavailable would be wrong.
+    stale_after_s: float | None = None
     config_refresh_interval_s: float = 300.0
     reload_debounce_s: float = _RELOAD_DEBOUNCE_S
     reload_min_interval_s: float = _RELOAD_MIN_INTERVAL_S
@@ -498,6 +501,7 @@ class SupervisorConfig:
     homeassistant_republish_delay_s: float = 5.0
     mqtt_maximum_packet_size: int = 1048576
     raw_mode: RawMode = False
+    log_to_mqtt: bool = False
     metrics_enabled: bool = False
     metrics_port: int = 9102
 
@@ -517,6 +521,7 @@ class Supervisor:
         self._http_session = http_session
 
         self.metrics = Metrics()
+        self._mqtt_log_handler: log.MqttLogHandler | None = None
         self._entities_store = EntitiesStore(config.data_dir / "entities.json")
         self._discovery_store = DiscoveryStore(config.data_dir / "discovery.json")
 
@@ -641,6 +646,7 @@ class Supervisor:
 
         self._spawn_supervised("mqtt_client", mqtt.run)
         await _wait_until(lambda: mqtt.reconnect_count >= 1)
+        self._attach_mqtt_log_handler_if_enabled(mqtt)
         self._start_metrics_server_if_enabled()
 
         rest, ws = await self._resolve_sysap_credentials(settings)
@@ -958,7 +964,7 @@ class Supervisor:
         rest: RestClient,
         config: Configuration,
     ) -> None:
-        events = EventPublisher(mqtt=mqtt)
+        events = EventPublisher(mqtt=mqtt, base_topic=self._config.base_topic)
         rate_limiter = RateLimiter(min_interval_s=self._config.get_rate_limit_s)
         reconciler = Reconciler(
             state=state,
@@ -1387,6 +1393,12 @@ class Supervisor:
                 "unsupported_channels": stats.channels_unsupported,
                 "orphan_channels_skipped": stats.channels_orphaned,
             }
+            # docs/06 §5.3: only reported when `availability.stale_after` is configured. A `0`
+            # when the feature is off would be indistinguishable from "measured, none stale".
+            if self._config.stale_after_s is not None and self._state is not None:
+                counts["stale_entities"] = self._state.stale_entity_count(
+                    self._config.stale_after_s
+                )
 
         sysap: dict[str, Any] = {"url": self._config.sysap_base_url}
         if settings is not None:
@@ -1514,6 +1526,38 @@ class Supervisor:
 
     # -------------------------------------------------------------------------------- shutdown
 
+    def _attach_mqtt_log_handler_if_enabled(self, mqtt: MqttClient) -> None:
+        """`advanced.log_to_mqtt` (docs/04 §4.5, P-44): the hook `cli.py`'s docstring named.
+
+        It has to happen *here* rather than in `configure_logging()`: that runs before any
+        `MqttClient` exists, because secrets must be redacted from the very first log line
+        (P-45). Attaching only once MQTT is connected is also what keeps a broker outage from
+        turning log emission into an exception path.
+        """
+        if not self._config.log_to_mqtt:
+            return
+        topic = topics.bridge_logging_topic(self._config.base_topic)
+
+        async def _publish(payload: bytes) -> None:
+            await mqtt.publish(topic, payload, qos=0, retain=False)
+
+        handler = log.MqttLogHandler(
+            publish=_publish,
+            secrets=(self._config.sysap_password, self._config.mqtt_password),
+        )
+        logging.getLogger().addHandler(handler)
+        self._mqtt_log_handler = handler
+
+    def _detach_mqtt_log_handler(self) -> None:
+        """Removed before the connection closes, so a shutdown log line cannot be handed to a
+        publisher whose client is already gone -- and so a restarted Supervisor in one process
+        (the tests do exactly this) never accumulates handlers.
+        """
+        if self._mqtt_log_handler is None:
+            return
+        logging.getLogger().removeHandler(self._mqtt_log_handler)
+        self._mqtt_log_handler = None
+
     async def _graceful_shutdown(self) -> None:
         """docs/08 §10, in order: stop new commands, flush pending ones, flush publisher state,
         publish an explicit offline, snapshot persistence, then close every connection.
@@ -1522,6 +1566,7 @@ class Supervisor:
         shutdown into a crash: these final publishes are best-effort (there's nobody to receive
         them if MQTT isn't there), so `MqttClientNotConnectedError` here is logged, not fatal.
         """
+        self._detach_mqtt_log_handler()
         await self._stop_virtual_device_keepalives()
         if self._commands is not None:
             self._commands.stop_accepting()

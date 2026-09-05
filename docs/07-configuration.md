@@ -74,7 +74,8 @@ entities:
   include_virtual_devices: false
   interfaces: [TP, RF, smokealarm, undefined]   # docs/01 §4.2
   publish_last_changed: true
-  exclude: []                       # entity ids or glob patterns
+  exclude: []                       # entity ids or fnmatch globs; matched against the stable
+                                    # id (never the topic, which a rename can change)
   include: []                       # if non-empty, an allowlist applied after exclude
 
 performance:
@@ -91,7 +92,8 @@ availability:
   enabled: true
   grace_seconds: 10                 # before a SysAP drop flips bridge/state
   per_device: true                  # use unresponsive/defect (docs/06 §5.2)
-  stale_after: null                 # informational counter only
+  stale_after: null                 # seconds; informational counter only, reported as
+                                    # bridge/info counts.stale_entities (docs/06 §5.3)
 
 advanced:
   data_dir: /data                   # persisted state, caches

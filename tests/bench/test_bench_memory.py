@@ -188,7 +188,7 @@ async def _steady_state_rss_samples() -> tuple[list[int], list[tracemalloc.Stati
             entities=entities,
             ingress_table=_ingress_table(),
             state=state,
-            events=EventPublisher(mqtt=client),
+            events=EventPublisher(mqtt=client, base_topic=BASE),
             metrics=Metrics(),
         )
         publisher = Publisher(

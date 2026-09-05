@@ -260,6 +260,9 @@ datapoint through the pipeline rather than only checking that keys exist, which 
 
 ## 5. WP15 — `scenesTriggered`: the last unhandled frame key
 
+> **Landed.** Scene frames now apply their contained outputs to state and emit a
+> `bridge/event` `scene_triggered`. All six of docs/01 §5.1's frame keys are handled.
+
 **Why now** [`docs/05 §7`](05-performance.md#7-anti-patterns--explicitly-do-not-do-these) names
 "handling only `datapoints` from the WS frame" as an anti-pattern present in *both* reference
 implementations, and [`docs/01 §5.1`](01-freeathome-api.md#51-frame-schema) calls handling the other
@@ -307,9 +310,28 @@ since the new branch must not introduce an `await`.
 
 **Size** M.
 
+### 5.1 As built
+
+The plan proposed emitting the edge through the existing `EventPublisher`. That turned out to need
+one addition: an *entity* event needs an entity, and the scene's own channel matches no shipped
+profile, so a scene trigger would have been invisible in exactly the common case. `EventPublisher`
+gained `emit_bridge_event()` and the scene path emits `bridge/event` `scene_triggered` per scene
+serial, alongside applying the outputs (which do produce ordinary entity events wherever a
+contained datapoint belongs to a `kind: event` binding). Making its `base_topic` a *required*
+argument rather than a defaulted one was deliberate — a default is how a real installation ends up
+publishing to the wrong topic silently, which is the class of defect WP16 exists to stamp out.
+
+The R2 exemption is recorded in [`docs/05 §3`](05-performance.md#3-the-hot-path-rules) next to the
+rule itself, and `test_scene_frames_do_not_introduce_an_await_on_the_hot_path` extends P-25's
+static check to the new branch.
+
 ---
 
 ## 6. WP16 — No silently inert setting
+
+> **Landed.** Four knobs wired (`entities.exclude`/`include`, `availability.stale_after`,
+> `advanced.log_to_mqtt`, `mqtt.cert`/`key`), and `test_no_silently_inert_settings` now makes the
+> inert set a tested fact rather than a docstring claim.
 
 **Why now** Eight knobs are accepted, validated and inert
 ([§1.4](#14-config-knobs-accepted-validated-and-inert)). The post-WP12 YAGNI round found and closed
@@ -354,6 +376,29 @@ current batch and then makes the class of defect hard to reintroduce.
 **Closes** Five named gaps in `settings.py`'s and `cli.py`'s module docstrings.
 
 **Size** M.
+
+### 6.1 What the meta-test found immediately
+
+It flagged `advanced.log_level` on its first run — a knob that is in fact perfectly well wired,
+by `cli.py`, because logging is configured before a `Supervisor` exists at all (secrets must be
+redacted from the first line, P-45). The right response was to fix the *test's* notion of a
+consumer, not to mislabel three working knobs as inert: the check now scans an explicit list of
+consumer modules, and that list being explicit is what stops "it's wired somewhere else" from
+becoming the excuse that hides a genuinely dropped knob.
+
+Two smaller decisions worth recording:
+
+- **Patterns match the entity id, never the topic.** A topic is a slugified friendly name that
+  `entity/rename` can change at runtime; an id cannot. Matching topics would let a rename silently
+  move an entity in or out of the filter — the exact failure [ADR-010](00-overview-and-decisions.md#adr-010)
+  introduced stable ids to prevent.
+- **A client certificate without its key is rejected at load**, with a field path, rather than at
+  the first TLS handshake. Half a certificate is a misconfiguration, and
+  [`docs/07 §1`](07-configuration.md#1-principles) says those are fatal at load.
+
+`availability.stale_after` needed the new per-entity `last_changed_at` the plan predicted — and
+`seed()` stamps it too, so a freshly started bridge does not report its whole installation as
+stale before anything has had a chance to change.
 
 ---
 

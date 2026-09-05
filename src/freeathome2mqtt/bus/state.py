@@ -33,10 +33,21 @@ class StateStore:
         # unpruned per-entity side dict as one of two known unbounded-growth traps, and
         # prescribes exactly this shape ("store it in the entity's slot, not a side dict").
         self.first_dirty_at: list[float] = [0.0] * len(entities)
+        # When each entity's value last actually *changed*, for docs/06 §5.3's staleness counter
+        # (`availability.stale_after`). Distinct from `first_dirty_at` above, which is about the
+        # publish wait: this one survives the publish and is what makes "this sensor has not
+        # moved in a week" answerable. Same parallel-list shape, same docs/05 §6 reasoning.
+        self.last_changed_at: list[float] = [0.0] * len(entities)
 
     def seed(self, entity_idx: int, attr_idx: int, value: Any) -> None:
-        """Set an initial value without marking dirty (startup/resync snapshot apply)."""
+        """Set an initial value without marking dirty (startup/resync snapshot apply).
+
+        This *does* stamp `last_changed_at`: leaving a freshly seeded installation at 0.0 would
+        report every entity as stale the moment the bridge started, which is the opposite of what
+        docs/06 §5.3's counter is for.
+        """
         self.values[entity_idx][attr_idx] = value
+        self.last_changed_at[entity_idx] = self._clock()
 
     def apply(self, entity_idx: int, attr_idx: int, value: Any, *, attr_bit: int = 0) -> bool:
         """Change detection (docs/05 §3 R4): store and mark dirty only if `value` actually changed.
@@ -54,6 +65,7 @@ class StateStore:
         if slot[attr_idx] == value:
             return False
         slot[attr_idx] = value
+        self.last_changed_at[entity_idx] = self._clock()
         self._mark_dirty(entity_idx)
         return True
 
@@ -66,6 +78,7 @@ class StateStore:
         """
         self.values[entity_idx][attr_idx] = value
         self.unconfirmed[entity_idx] |= attr_bit
+        self.last_changed_at[entity_idx] = self._clock()
         self._mark_dirty(entity_idx)
 
     def _mark_dirty(self, entity_idx: int) -> None:
@@ -80,6 +93,20 @@ class StateStore:
             self.first_dirty_at[entity_idx] = self._clock()
             self.dirty.add(entity_idx)
         self.wake.set()
+
+    def stale_entity_count(self, stale_after_s: float) -> int:
+        """How many entities have not changed within `stale_after_s` (docs/06 §5.3).
+
+        Informational only, and deliberately never wired to availability: plenty of free@home
+        channels legitimately do not change for months (a garage door sensor, a rarely-used
+        switch), so marking them unavailable would be wrong. The counter exists so a user can
+        spot a genuinely dead sensor; the judgement stays theirs.
+
+        An O(entities) scan, which is fine because the only caller is `bridge/info` -- republished
+        at most every 30 s, never on the hot path.
+        """
+        cutoff = self._clock() - stale_after_s
+        return sum(1 for changed_at in self.last_changed_at if changed_at < cutoff)
 
     def take_dirty(self) -> set[int]:
         """Atomically swap out the dirty set for a fresh one (docs/05 §4.1)."""

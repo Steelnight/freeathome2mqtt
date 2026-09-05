@@ -240,7 +240,10 @@ installation, verify every **⚠ verify empirically** marker in
 
 1. Does an `unresponsive` transition arrive as a `devices` WS frame, or only via config polling?
    (Determines the `config_refresh_interval` default — [`docs/06 §4.1`](06-resilience.md#41-when-to-resync).)
-2. Do `scenesTriggered` frames duplicate the corresponding `datapoints` entries?
+2. Do `scenesTriggered` frames duplicate the corresponding `datapoints` entries? *(WP15 made the
+   answer not matter for correctness — change detection makes a duplicate a no-op, asserted by
+   `test_scene_trigger_application_is_idempotent_with_datapoints` — but the protocol fact is
+   still unconfirmed.)*
 3. Are WS `datapoints` keys always in `odpXXXX` form?
 4. Does the current firmware accept `installer` as the Basic-auth username, or is the `jid` needed?
 5. What is the actual concurrency threshold at which `502`s begin? (Calibrates `max_inflight`.)

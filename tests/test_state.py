@@ -209,3 +209,73 @@ def test_optimistic_marks_also_start_the_clock() -> None:
     store.mark_optimistic(1, 0, "on", attr_bit=1)
 
     assert store.first_dirty_at[1] == 42.0
+
+
+# ---------------------------------------------- WP16: last_changed_at, for availability.stale_after
+
+
+def test_last_changed_at_records_when_a_value_actually_changed() -> None:
+    """docs/06 §5.3's staleness counter needs to know when each entity last *changed*.
+
+    Held in a list indexed by entity, alongside `first_dirty_at` -- docs/05 §6 names an unpruned
+    per-entity side dict as a known unbounded-growth trap and prescribes this shape instead.
+    """
+    clock = _FakeClock()
+    store = StateStore(_entities(2), clock=clock)
+
+    clock.now = 100.0
+    store.apply(0, 0, "on")
+
+    assert store.last_changed_at[0] == 100.0
+    assert store.last_changed_at[1] == 0.0
+
+
+def test_an_unchanged_repeat_does_not_refresh_last_changed_at() -> None:
+    """The distinction that makes the counter meaningful: a sensor re-reporting the same value
+    every minute is *not* fresh. R4 already gates this; the timestamp must follow the same gate.
+    """
+    clock = _FakeClock()
+    store = StateStore(_entities(1), clock=clock)
+
+    clock.now = 100.0
+    store.apply(0, 0, "on")
+    clock.now = 500.0
+    store.apply(0, 0, "on")
+
+    assert store.last_changed_at[0] == 100.0
+
+
+def test_seeding_records_last_changed_at_so_startup_is_not_instantly_stale() -> None:
+    """Startup seeds every entity from the config snapshot. Leaving those at 0.0 would report a
+    whole installation as stale the moment the bridge came up.
+    """
+    clock = _FakeClock()
+    clock.now = 100.0
+    store = StateStore(_entities(1), clock=clock)
+
+    store.seed(0, 0, "on")
+
+    assert store.last_changed_at[0] == 100.0
+
+
+def test_stale_entity_count_is_zero_when_nothing_is_stale() -> None:
+    clock = _FakeClock()
+    store = StateStore(_entities(2), clock=clock)
+    clock.now = 100.0
+    store.apply(0, 0, "on")
+    store.apply(1, 0, "on")
+
+    clock.now = 150.0
+    assert store.stale_entity_count(60.0) == 0
+
+
+def test_stale_entity_count_counts_entities_past_the_window() -> None:
+    clock = _FakeClock()
+    store = StateStore(_entities(2), clock=clock)
+    clock.now = 100.0
+    store.apply(0, 0, "on")
+    clock.now = 200.0
+    store.apply(1, 0, "on")
+
+    clock.now = 230.0  # entity 0 last changed 130s ago, entity 1 only 30s ago
+    assert store.stale_entity_count(60.0) == 1

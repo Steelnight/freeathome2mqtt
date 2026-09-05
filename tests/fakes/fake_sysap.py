@@ -204,6 +204,32 @@ class FakeSysAp:
         self.set_datapoint(serial, channel, datapoint, value)
         await self.push_ws_frame({"datapoints": {f"{serial}/{channel}/{datapoint}": value}})
 
+    async def trigger_scene(
+        self, scene_serial: str, channels: dict[str, dict[str, tuple[str, int]]]
+    ) -> None:
+        """Push a `scenesTriggered` frame (docs/01 §5.1; docs/12 WP15).
+
+        `channels` maps channel id -> {datapoint id: (value, pairingID)}, which is the shape a
+        caller actually has to hand; the nested `outputs`/`value`/`pairingID` wrapping the wire
+        uses is built here. Datapoint state is updated too, so a subsequent config fetch agrees
+        with what the scene reported -- a scene really does drive those outputs.
+        """
+        payload: dict[str, Any] = {"channels": {}}
+        for channel_id, outputs in channels.items():
+            payload["channels"][channel_id] = {
+                "outputs": {
+                    datapoint_id: {"value": value, "pairingID": pairing}
+                    for datapoint_id, (value, pairing) in outputs.items()
+                }
+            }
+            for datapoint_id, (value, _pairing) in outputs.items():
+                # A scene serial absent from the stored configuration is not an error: a scene
+                # frame can legitimately name channels this fake was never configured with,
+                # which is exactly the "unmapped channel" case the bridge has to tolerate.
+                with contextlib.suppress(KeyError):
+                    self.set_datapoint(scene_serial, channel_id, datapoint_id, value)
+        await self.push_ws_frame({"scenesTriggered": {scene_serial: payload}})
+
     async def drop_websocket(self) -> None:
         """Close every live WS connection cleanly (a clean disconnect, not a hang)."""
         for ws in list(self._ws_clients):

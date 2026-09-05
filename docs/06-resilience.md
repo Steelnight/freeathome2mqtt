@@ -159,7 +159,9 @@ instead of reporting a stale value forever — which no MQTT bridge for this sys
 
 ### 5.3 Staleness — informational only
 
-If an entity has published no change for `stale_after` (default: disabled), `bridge/info` counts it.
+If an entity has published no change for `stale_after` (default: disabled), `bridge/info` counts it
+as `counts.stale_entities`. The key is absent entirely when the feature is off, so a `0` always
+means "measured, none stale" rather than "not measuring".
 Deliberately **not** wired to availability: many free@home channels legitimately never change for
 months (a garage door sensor, a rarely-used switch), and marking those unavailable would be wrong.
 The counter exists so a user can spot a genuinely dead sensor; the judgement stays theirs.

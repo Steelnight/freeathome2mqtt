@@ -8,16 +8,20 @@ import ast
 import asyncio
 import contextlib
 import inspect
+import logging
 import textwrap
 import time
 from collections.abc import Mapping
 from typing import Any
 from unittest.mock import AsyncMock
 
+import aiomqtt
+import orjson
 import pytest
 
 from fakes.fake_broker import running_fake_broker
 from fakes.fake_sysap import FakeSysAp, running_fake_sysap
+from freeathome2mqtt.bus.events import EventPublisher
 from freeathome2mqtt.bus.ingress import Ingress
 from freeathome2mqtt.bus.publisher import Publisher
 from freeathome2mqtt.bus.raw import RawStatePublisher
@@ -73,9 +77,13 @@ class _FakeEvents:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, object, str]] = []
+        self.bridge_events: list[tuple[str, dict[str, object]]] = []
 
     async def emit(self, entity: Entity, *, attribute: str, value: object, event: str) -> None:
         self.calls.append((entity.id, attribute, value, event))
+
+    async def emit_bridge_event(self, event_type: str, data: dict[str, object]) -> None:
+        self.bridge_events.append((event_type, data))
 
 
 class _DisconnectedEvents:
@@ -83,6 +91,9 @@ class _DisconnectedEvents:
 
     async def emit(self, entity: Entity, *, attribute: str, value: object, event: str) -> None:
         raise MqttClientNotConnectedError(entity.state_topic)
+
+    async def emit_bridge_event(self, event_type: str, data: dict[str, object]) -> None:
+        raise MqttClientNotConnectedError(event_type)
 
 
 async def _wait_until(predicate, *, timeout_seconds: float = 5.0, interval: float = 0.005) -> None:
@@ -496,3 +507,253 @@ def test_a_frame_carrying_no_datapoints_still_counts_as_a_frame() -> None:
 
     assert metrics.ws_frames == 1
     assert metrics.datapoints_in == 0
+
+
+# ------------------------------------------------------- WP15: scenesTriggered (docs/01 §5.1)
+
+
+SCENE_SERIAL = "ABB28000ABCD"
+
+
+def _scene_frame(serial: str, channel: str, outputs: dict[str, dict[str, object]]) -> dict:
+    """docs/01 §5.1's nested shape: sceneSerial -> channels -> outputs -> {value, pairingID}."""
+    return {"scenesTriggered": {serial: {"channels": {channel: {"outputs": outputs}}}}}
+
+
+def _scene_ingress() -> tuple[list[Entity], dict[str, Binding], StateStore, _FakeEvents, Metrics]:
+    """One entity whose datapoint is addressed by the *scene's* serial, which is how a scene
+    frame's contained outputs are keyed (docs/01 §5.1).
+    """
+    entities = [
+        Entity(
+            idx=0,
+            id=f"{SCENE_SERIAL}_ch0000",
+            profile="test_profile",
+            name="Scene",
+            area=None,
+            device_serial=SCENE_SERIAL,
+            channel_id="ch0000",
+            attr_names=("state",),
+            attr_kinds=(AttrKind.STATE,),
+            state_topic=f"{BASE}/scene",
+            set_topic=f"{BASE}/scene/set",
+            get_topic=f"{BASE}/scene/get",
+            availability_topic=None,
+            optimistic=False,
+            discovery=(),
+        )
+    ]
+    codec = build_codec("bool01")
+    table = {
+        f"{SCENE_SERIAL}/ch0000/odp0000": Binding(
+            entity_idx=0, attr_idx=0, decode=codec.decode, kind=AttrKind.STATE, attr_bit=1
+        )
+    }
+    state = StateStore(entities)
+    return entities, table, state, _FakeEvents(), Metrics()
+
+
+async def test_scene_trigger_applies_contained_output_values_to_state() -> None:
+    """docs/01 §5.1: "Also apply the contained output values to state -- a scene trigger is often
+    the only notification you get for the channels it drove." Nothing did this before WP15.
+    """
+    entities, table, state, events, metrics = _scene_ingress()
+    ingress = Ingress(
+        entities=entities, ingress_table=table, state=state, events=events, metrics=metrics
+    )
+
+    ingress.process_frame(
+        _scene_frame(SCENE_SERIAL, "ch0000", {"odp0000": {"value": "1", "pairingID": 256}})
+    )
+
+    assert state.values[0][0] is True
+    assert state.dirty == {0}
+
+
+async def test_scene_trigger_publishes_a_bridge_event() -> None:
+    """The scene channel itself usually matches no profile, so state application alone would
+    leave the trigger invisible. One `bridge/event` per scene serial makes it observable
+    regardless (docs/04 §4.4).
+    """
+    entities, table, state, events, metrics = _scene_ingress()
+    ingress = Ingress(
+        entities=entities, ingress_table=table, state=state, events=events, metrics=metrics
+    )
+
+    ingress.process_frame(
+        _scene_frame(SCENE_SERIAL, "ch0000", {"odp0000": {"value": "1", "pairingID": 256}})
+    )
+    await _wait_until(lambda: events.bridge_events != [])
+
+    assert events.bridge_events == [("scene_triggered", {"serial": SCENE_SERIAL})]
+
+
+async def test_scene_trigger_application_is_idempotent_with_datapoints() -> None:
+    """docs/01 §5.1 marks "do the corresponding `datapoints` entries also arrive?" as
+    **verify empirically**. The code is correct under either answer because change detection
+    (R4) makes the duplicate a no-op -- this is the test that says so (P12).
+    """
+    entities, table, state, events, metrics = _scene_ingress()
+    ingress = Ingress(
+        entities=entities, ingress_table=table, state=state, events=events, metrics=metrics
+    )
+    key = f"{SCENE_SERIAL}/ch0000/odp0000"
+
+    ingress.process_frame(_scene_frame(SCENE_SERIAL, "ch0000", {"odp0000": {"value": "1"}}))
+    state.dirty.clear()  # stand in for the publisher having drained it
+    ingress.process_frame({"datapoints": {key: "1"}})
+
+    assert state.dirty == set()  # the duplicate produced no further publish at all
+
+
+async def test_scene_trigger_for_an_unmapped_channel_is_counted_not_an_error() -> None:
+    """A scene may drive channels this bridge filtered out; that is expected, not exceptional."""
+    entities, table, state, events, metrics = _scene_ingress()
+    ingress = Ingress(
+        entities=entities, ingress_table=table, state=state, events=events, metrics=metrics
+    )
+
+    ingress.process_frame(_scene_frame(SCENE_SERIAL, "ch0099", {"odp0000": {"value": "1"}}))
+
+    assert metrics.unmapped_datapoints == 1
+    assert state.dirty == set()
+
+
+async def test_scene_trigger_tolerates_a_malformed_outputs_block() -> None:
+    """WS frames are untrusted input (CLAUDE.md §2 rule 1): a missing `outputs`, a non-dict
+    entry, or an absent `value` must be skipped, never raise on the hot path.
+    """
+    entities, table, state, events, metrics = _scene_ingress()
+    ingress = Ingress(
+        entities=entities, ingress_table=table, state=state, events=events, metrics=metrics
+    )
+
+    ingress.process_frame({"scenesTriggered": {SCENE_SERIAL: {}}})
+    ingress.process_frame({"scenesTriggered": {SCENE_SERIAL: {"channels": {"ch0000": {}}}}})
+    ingress.process_frame(_scene_frame(SCENE_SERIAL, "ch0000", {"odp0000": {}}))
+    ingress.process_frame(_scene_frame(SCENE_SERIAL, "ch0000", {"odp0000": "not-a-dict"}))
+
+    assert state.dirty == set()
+
+
+def test_scene_frames_do_not_introduce_an_await_on_the_hot_path() -> None:
+    """P-25 / rule R1 extended to the new branch: the scene path must hand off, never await."""
+    assert not _has_await(Ingress.process_frame)
+    assert not _has_await(Ingress._process_scenes)
+
+
+async def test_scene_trigger_reaches_mqtt_through_the_real_pipeline() -> None:
+    """End to end over the fake SysAP and a real broker (docs/10 §3): a scene frame produced by
+    the fake becomes a retained state publish and a `bridge/event`.
+    """
+    entities, table, state, _events, metrics = _scene_ingress()
+
+    async with running_fake_broker() as broker, running_fake_sysap(FakeSysAp()) as (fake, http):
+        client = MqttClient(
+            host="127.0.0.1",
+            port=broker.port,
+            base_topic=BASE,
+            sysap_serial=SCENE_SERIAL,
+            backoff_initial=0.02,
+            backoff_cap=0.2,
+        )
+        mqtt_task = asyncio.create_task(client.run())
+        await _wait_until(lambda: client.reconnect_count >= 1)
+
+        ingress = Ingress(
+            entities=entities,
+            ingress_table=table,
+            state=state,
+            events=EventPublisher(mqtt=client, base_topic=BASE),
+            metrics=metrics,
+        )
+        publisher = Publisher(entities=entities, state=state, mqtt=client, coalesce_ms=0)
+        publisher_task = asyncio.create_task(publisher.run())
+
+        reader = WsReader(
+            url=str(http.make_url("/fhapi/v1/api/ws")),
+            username="installer",
+            password="secret",
+            session=http.session,
+            on_frame=ingress.process_frame,
+        )
+        reader_task = asyncio.create_task(reader.run())
+        await _wait_until(lambda: reader.reconnect_count >= 1)
+
+        async with aiomqtt.Client("127.0.0.1", port=broker.port) as outsider:
+            await outsider.subscribe(f"{BASE}/#")
+            await fake.trigger_scene(SCENE_SERIAL, {"ch0000": {"odp0000": ("1", 256)}})
+
+            seen: dict[str, Any] = {}
+            async with asyncio.timeout(5.0):
+                async for message in outsider.messages:
+                    seen[str(message.topic)] = orjson.loads(message.payload)
+                    if f"{BASE}/scene" in seen and f"{BASE}/bridge/event" in seen:
+                        break
+
+        publisher_task.cancel()
+        reader_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await publisher_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await reader_task
+        await reader.stop()
+        await client.stop()
+        await asyncio.wait_for(mqtt_task, timeout=5.0)
+
+    assert seen[f"{BASE}/scene"]["state"] is True
+    assert seen[f"{BASE}/bridge/event"] == {
+        "type": "scene_triggered",
+        "data": {"serial": SCENE_SERIAL},
+    }
+
+
+async def test_a_scene_bridge_event_dropped_while_disconnected_is_logged_not_raised(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Same rule as an entity event (ADR-005): an edge missed while MQTT is down is gone, and is
+    logged with context rather than swallowed or allowed to escape a background task.
+    """
+    entities, table, state, _events, metrics = _scene_ingress()
+    ingress = Ingress(
+        entities=entities,
+        ingress_table=table,
+        state=state,
+        events=_DisconnectedEvents(),
+        metrics=metrics,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        ingress.process_frame(_scene_frame(SCENE_SERIAL, "ch0000", {"odp0000": {"value": "1"}}))
+        await _wait_until(lambda: "scene_triggered" in caplog.text)
+
+    assert "MQTT not connected" in caplog.text
+    # The state half still happened: a broker outage must not cost the value the scene carried.
+    assert state.values[0][0] is True
+
+
+async def test_a_scene_naming_a_non_dict_trigger_is_skipped() -> None:
+    """Every level of the nested shape is untrusted (CLAUDE.md §2 rule 1)."""
+    entities, table, state, events, metrics = _scene_ingress()
+    ingress = Ingress(
+        entities=entities, ingress_table=table, state=state, events=events, metrics=metrics
+    )
+
+    ingress.process_frame({"scenesTriggered": {SCENE_SERIAL: "not-a-dict"}})
+    await _wait_until(lambda: events.bridge_events != [])
+
+    assert state.dirty == set()
+    assert events.bridge_events == [("scene_triggered", {"serial": SCENE_SERIAL})]
+
+
+async def test_a_scene_channel_that_is_not_a_dict_is_skipped() -> None:
+    entities, table, state, events, metrics = _scene_ingress()
+    ingress = Ingress(
+        entities=entities, ingress_table=table, state=state, events=events, metrics=metrics
+    )
+
+    ingress.process_frame(
+        {"scenesTriggered": {SCENE_SERIAL: {"channels": {"ch0000": "not-a-dict"}}}}
+    )
+
+    assert state.dirty == set()

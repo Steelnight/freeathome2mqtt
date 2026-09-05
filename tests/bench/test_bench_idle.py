@@ -151,7 +151,7 @@ async def _measure_idle() -> tuple[float, float, int]:
             entities=entities,
             ingress_table=_ingress_table(),
             state=state,
-            events=EventPublisher(mqtt=client),
+            events=EventPublisher(mqtt=client, base_topic=BASE),
             metrics=metrics,
         )
         publisher = Publisher(entities=entities, state=state, mqtt=client, coalesce_ms=20)

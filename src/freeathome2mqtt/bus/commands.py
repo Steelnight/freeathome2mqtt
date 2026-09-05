@@ -12,16 +12,17 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import orjson
 
+from freeathome2mqtt.metrics import Metrics
 from freeathome2mqtt.model.codecs import CommandError
 from freeathome2mqtt.model.entity import AttrKind
 from freeathome2mqtt.model.transforms import get_transform
 from freeathome2mqtt.mqtt import topics
-from freeathome2mqtt.sysap.rest import SysApError
+from freeathome2mqtt.sysap.rest import NotFoundError, SysApError
 
 if TYPE_CHECKING:
     import aiomqtt
@@ -71,6 +72,8 @@ class CommandDispatcher:
         default_optimistic: bool = True,
         optimistic_overrides: Mapping[int, bool] | None = None,
         debounce_overrides: Mapping[int, float] | None = None,
+        metrics: Metrics | None = None,
+        on_topology_changed: Callable[[], None] | None = None,
     ) -> None:
         self._entities = entities
         self._egress = egress
@@ -87,6 +90,12 @@ class CommandDispatcher:
         # above, keyed by entity idx (rebuilt from entities.json on every resync, docs/07 §4.1).
         self._optimistic_overrides = optimistic_overrides or {}
         self._debounce_overrides = debounce_overrides or {}
+        self._metrics = metrics if metrics is not None else Metrics()
+        # docs/06 §4.1's last row: a `404` on a write means the compiled model no longer matches
+        # the installation. The dispatcher only *reports* that; the Supervisor owns what to do
+        # about it, and its existing `_ReloadDebouncer` (P-55) is what keeps a burst of 404s from
+        # becoming a burst of config fetches (ADR-007).
+        self._on_topology_changed = on_topology_changed
 
         self._ordered_commands: dict[int, list[str]] = {}
         for entity_idx, cmd_name in egress:
@@ -284,6 +293,11 @@ class CommandDispatcher:
             if binding.confirm:
                 self._reconciler.schedule(entity_idx, attr_idx)
 
+        # docs/04 §4.2's `commands`, counted here: after validation (so a rejected message is an
+        # error, not a command) and before the debouncer (so the figure says how much is being
+        # asked of the bridge, which is the question docs/05 §9 step 4 uses it to answer -- the
+        # write count that survives debouncing is a different, deliberately different number).
+        self._metrics.commands += 1
         self._enqueue_write(entity_idx, cmd_name, encoded, binding, transaction)
         return True
 
@@ -346,6 +360,20 @@ class CommandDispatcher:
     ) -> None:
         try:
             await self._rest.put_datapoint(binding.rest_path, encoded)
+        except NotFoundError as exc:
+            # docs/06 §4.1: the datapoint is gone, so the model is stale -- a different failure
+            # from a rejected value, and the only write error that says anything about topology.
+            logger.warning(
+                "command write for entity %d %r hit a 404; requesting a resync: %s",
+                entity_idx,
+                cmd_name,
+                exc,
+            )
+            await self._respond_error(entity_idx, transaction, "set", str(exc))
+            if self._on_topology_changed is not None:
+                self._on_topology_changed()
+            if binding.optimistic_attr is not None:
+                await self._reconciler.reconcile_now(entity_idx, binding.optimistic_attr)
         except SysApError as exc:
             # F12: no retry; error to bridge/response; reconcile immediately rather than waiting
             # for the 3s timer, so the optimistic guess is corrected within one round trip.
@@ -382,6 +410,9 @@ class CommandDispatcher:
     async def _respond_error(
         self, entity_idx: int, transaction: str | None, command: str, error: str
     ) -> None:
+        # The single funnel for every command rejection -- validation, unknown command, unknown
+        # attribute, rate limit -- so `command_errors` is counted here exactly once per error.
+        self._metrics.command_errors += 1
         payload: dict[str, Any] = {
             "status": "error",
             "error": error,

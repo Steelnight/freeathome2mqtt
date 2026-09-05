@@ -276,3 +276,14 @@ WP4 and WP11.
    `requires` discriminator solves it. A transform is the last resort, and the list in
    [`docs/03 §7`](03-model-and-profiles.md#7-complex-profiles-and-the-transform-escape-hatch) should
    not grow much.
+
+---
+
+## After WP12
+
+All twelve packages landed. The work that follows — the two budgets in
+[`docs/05 §1`](05-performance.md#1-budgets) that no benchmark measures yet, the `bridge/info` stats
+that no counter feeds, the `scenesTriggered` frames nothing handles, and the `config.yaml` knobs the
+schema accepts and nothing acts on — is planned in
+[`docs/12`](12-quality-of-life-and-performance.md), in this same shape and under this same
+definition of done.

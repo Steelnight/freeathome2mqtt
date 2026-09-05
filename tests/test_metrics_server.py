@@ -122,3 +122,43 @@ async def test_metrics_server_only_serves_metrics_path(path: str) -> None:
     finally:
         await server.stop()
         await asyncio.wait_for(task, timeout=5.0)
+
+
+# ------------------------------------------------------ WP14: the new counters and histogram
+
+
+def test_render_prometheus_text_includes_the_wp14_counters() -> None:
+    metrics = Metrics()
+    metrics.ws_frames = 7
+    metrics.state_publishes = 11
+    metrics.commands = 13
+    metrics.command_errors = 2
+    text = render_prometheus_text(metrics).decode("utf-8")
+
+    assert "freeathome2mqtt_ws_frames 7" in text
+    assert "freeathome2mqtt_state_publishes 11" in text
+    assert "freeathome2mqtt_commands 13" in text
+    assert "freeathome2mqtt_command_errors 2" in text
+
+
+def test_render_prometheus_text_emits_a_cumulative_latency_histogram() -> None:
+    """Prometheus histograms are cumulative and end with a `+Inf` bucket; a scraper that gets
+    non-cumulative buckets silently computes wrong quantiles.
+    """
+    metrics = Metrics()
+    for seconds in (0.001, 0.012, 0.012, 4.0):
+        metrics.latency.observe(seconds)
+    text = render_prometheus_text(metrics).decode("utf-8")
+
+    assert "# TYPE freeathome2mqtt_publish_latency_ms histogram" in text
+    assert 'freeathome2mqtt_publish_latency_ms_bucket{le="1"} 1' in text
+    assert 'freeathome2mqtt_publish_latency_ms_bucket{le="15"} 3' in text
+    assert 'freeathome2mqtt_publish_latency_ms_bucket{le="+Inf"} 4' in text
+    assert "freeathome2mqtt_publish_latency_ms_count 4" in text
+    assert "freeathome2mqtt_publish_latency_ms_sum " in text
+
+
+def test_latency_histogram_renders_even_with_no_observations() -> None:
+    text = render_prometheus_text(Metrics()).decode("utf-8")
+    assert 'freeathome2mqtt_publish_latency_ms_bucket{le="+Inf"} 0' in text
+    assert "freeathome2mqtt_publish_latency_ms_count 0" in text

@@ -7,17 +7,16 @@ runs the semantic checks in docs/07 §2.2 before `Settings.model_validate()` eve
 since some of those (`!secret`'s `data_dir` lookup) cannot be expressed as a pydantic validator.
 
 `settings_to_supervisor_config()` is the one-way translator `supervisor.SupervisorConfig`'s own
-docstring promises: a validated `Settings` becomes a `SupervisorConfig`, never the reverse. Several
-`config.yaml` knobs documented in docs/07 §2 have no effect yet -- `mqtt.version` (MQTT 3.1.1 only,
-see `mqtt/client.py`'s docstring), `homeassistant.legacy_entity_attributes` (its exact shape is not
-specified anywhere in docs/04 §6, so it stays accepted-and-validated rather than guessed at),
-`entities.exclude`/`include` (accepted and validated, not yet enforced by `model.compiler`),
-adaptive coalescing, `advanced.cache_config`, and `availability.stale_after` (docs/06 §5.3:
-counting entities that haven't changed in this long needs a last-changed timestamp per entity --
-new state, not just wiring -- so it stays accepted-and-validated rather than half-built into
-`bridge/info`). Each is a named, deliberate gap, not a silent drop -- the schema still accepts and
-validates them so a `config.yaml` written against the full docs/07 reference loads cleanly today
-and picks up real behaviour as later work packages land.
+docstring promises: a validated `Settings` becomes a `SupervisorConfig`, never the reverse.
+
+**Which knobs are inert is now a tested fact, not a docstring claim (WP16).**
+`tests/test_settings.py::test_no_silently_inert_settings` walks every leaf field in `Settings` and
+requires each one to be either read by a named consumer module or listed in that test's
+`DELIBERATELY_INERT` allowlist with a reason. The same defect -- a documented knob that is
+accepted, validated, and then quietly dropped -- had been found three separate times by people
+reading code (WP9 named five, the post-WP12 YAGNI pass found seven more, WP16 found four), which
+is what a test is for. Wiring the remaining four was the small half of WP16; the meta-test is the
+half that stops it recurring.
 `homeassistant.enabled`/`discovery_topic`/`status_topic`/`republish_delay` and
 `mqtt.maximum_packet_size` are wired as of WP10; `advanced.raw_mode` as of WP11 (`bus/raw.py`);
 per-entity `optimistic`/`debounce_ms`/`homeassistant` overrides (via `entity/options`, not a
@@ -32,6 +31,8 @@ YAGNI-cleanup pass: each was previously validated but silently inert, found and 
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import logging
 import os
 import ssl as ssl_module
@@ -211,7 +212,6 @@ class AdvancedSection(BaseModel):
     log_to_mqtt: bool = False
     log_format: Literal["text", "json"] = "text"
     raw_mode: Literal[False, "unsupported_only", True] = False
-    cache_config: bool = True
     metrics: MetricsSection = Field(default_factory=MetricsSection)
 
 
@@ -230,6 +230,13 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def _cross_section_checks(self) -> Settings:
+        # A client certificate is only usable as a pair. Rejecting half of one here means a
+        # misconfiguration fails at load with a field path (docs/07 §1), rather than at the first
+        # TLS handshake with an error nobody traces back to config.yaml.
+        if self.mqtt.cert is not None and self.mqtt.key is None:
+            raise ValueError("mqtt.cert is set without mqtt.key; a client certificate needs both")
+        if self.mqtt.key is not None and self.mqtt.cert is None:
+            raise ValueError("mqtt.key is set without mqtt.cert; a client certificate needs both")
         if self.homeassistant.discovery_topic == self.mqtt.base_topic:
             raise ValueError(
                 "homeassistant.discovery_topic must differ from mqtt.base_topic "
@@ -277,7 +284,7 @@ def _validate_base_topic(base_topic: str) -> None:
         )
 
 
-def _parse_mqtt_server(server: str) -> tuple[str, int]:
+def parse_mqtt_server(server: str) -> tuple[str, int]:
     parsed = urlparse(server)
     if parsed.scheme not in _MQTT_DEFAULT_PORTS or not parsed.hostname:
         raise SettingsError(
@@ -407,12 +414,24 @@ async def build_sysap_ssl(sysap: SysApSection) -> ssl_module.SSLContext | bool:
 
 
 async def _build_mqtt_tls(mqtt: MqttSection) -> ssl_module.SSLContext | None:
-    """Only a CA file is wired -- `mqtt.cert`/`mqtt.key` (client-certificate auth) are accepted
-    by the schema but not yet plumbed into a context; a real, named gap, not silently dropped.
+    """The MQTT TLS context: CA trust plus, since WP16, client-certificate auth.
+
+    `load_cert_chain` reads files from disk, so it goes through the executor per ADR-001's
+    blocking-I/O exception rather than being called straight from a coroutine. The
+    cert-without-key case cannot reach here: `_validate_semantics` rejects it at load time
+    (docs/07 §2.2), so a misconfiguration fails with a field path instead of at first connect.
     """
-    if mqtt.ca is None:
+    if mqtt.ca is None and mqtt.cert is None:
         return None
-    context = cast(ssl_module.SSLContext, await build_ssl_context("ca_file", ca_file=mqtt.ca))
+    if mqtt.ca is not None:
+        context = cast(ssl_module.SSLContext, await build_ssl_context("ca_file", ca_file=mqtt.ca))
+    else:
+        context = cast(ssl_module.SSLContext, await build_ssl_context("verify"))
+    if mqtt.cert is not None and mqtt.key is not None:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, functools.partial(context.load_cert_chain, mqtt.cert, mqtt.key)
+        )
     if not mqtt.reject_unauthorized:
         context.check_hostname = False
         context.verify_mode = ssl_module.CERT_NONE
@@ -423,7 +442,7 @@ async def settings_to_supervisor_config(settings: Settings) -> SupervisorConfig:
     """The one-way translation `SupervisorConfig`'s own docstring names as settings.py's job."""
     sysap_ssl = await build_sysap_ssl(settings.sysap)
     mqtt_tls = await _build_mqtt_tls(settings.mqtt)
-    mqtt_host, mqtt_port = _parse_mqtt_server(settings.mqtt.server)
+    mqtt_host, mqtt_port = parse_mqtt_server(settings.mqtt.server)
 
     configured = set(settings.entities.interfaces) - {_UNDEFINED_INTERFACE}
     excluded_interfaces = frozenset(_KNOWN_INTERFACES - configured)
@@ -452,9 +471,14 @@ async def settings_to_supervisor_config(settings: Settings) -> SupervisorConfig:
             include_orphan_channels=settings.entities.include_orphan_channels,
             include_virtual_devices=settings.entities.include_virtual_devices,
             excluded_interfaces=excluded_interfaces,
+            exclude_patterns=tuple(settings.entities.exclude),
+            include_patterns=tuple(settings.entities.include),
         ),
         data_dir=settings.advanced.data_dir,
         coalesce_ms=settings.performance.coalesce_ms,
+        coalesce_adaptive=settings.performance.coalesce_adaptive,
+        coalesce_max_ms=settings.performance.coalesce_max_ms,
+        coalesce_burst_threshold=settings.performance.coalesce_burst_threshold,
         publish_last_changed=settings.entities.publish_last_changed,
         command_debounce_s=settings.performance.command_debounce_ms / 1000,
         default_optimistic=settings.performance.optimistic,
@@ -463,6 +487,7 @@ async def settings_to_supervisor_config(settings: Settings) -> SupervisorConfig:
         grace_seconds=settings.availability.grace_seconds,
         availability_enabled=settings.availability.enabled,
         availability_per_device=settings.availability.per_device,
+        stale_after_s=settings.availability.stale_after,
         config_refresh_interval_s=settings.sysap.config_refresh_interval,
         link_backoff_initial=settings.sysap.reconnect.initial,
         link_backoff_factor=settings.sysap.reconnect.factor,
@@ -475,6 +500,7 @@ async def settings_to_supervisor_config(settings: Settings) -> SupervisorConfig:
         homeassistant_republish_delay_s=settings.homeassistant.republish_delay,
         mqtt_maximum_packet_size=settings.mqtt.maximum_packet_size,
         raw_mode=settings.advanced.raw_mode,
+        log_to_mqtt=settings.advanced.log_to_mqtt,
         metrics_enabled=settings.advanced.metrics.enabled,
         metrics_port=settings.advanced.metrics.port,
     )

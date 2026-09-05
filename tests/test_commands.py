@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 import aiomqtt
@@ -18,6 +18,7 @@ from fakes.fake_sysap import FakeSysAp, running_fake_sysap
 from freeathome2mqtt.bus.commands import CommandDispatcher
 from freeathome2mqtt.bus.reconcile import RateLimiter, Reconciler
 from freeathome2mqtt.bus.state import StateStore
+from freeathome2mqtt.metrics import Metrics
 from freeathome2mqtt.model.codecs import build_codec
 from freeathome2mqtt.model.entity import AttrKind, Binding, EgressBinding, Entity
 from freeathome2mqtt.mqtt.client import MqttClient
@@ -266,6 +267,8 @@ async def _environment(
     default_optimistic: bool = True,
     optimistic_overrides: dict[int, bool] | None = None,
     debounce_overrides: dict[int, float] | None = None,
+    metrics: Metrics | None = None,
+    on_topology_changed: Callable[[], None] | None = None,
 ) -> AsyncIterator[_Environment]:
     entities, egress, ingress = _fixture()
     state = StateStore(entities)
@@ -324,6 +327,8 @@ async def _environment(
                 default_optimistic=default_optimistic,
                 optimistic_overrides=optimistic_overrides or {},
                 debounce_overrides=debounce_overrides or {},
+                metrics=metrics,
+                on_topology_changed=on_topology_changed,
             )
             dispatcher_holder.append(dispatcher)
 
@@ -801,3 +806,101 @@ async def test_write_failure_without_optimistic_tracking_still_responds() -> Non
         await env.collect_responses(count=1)
 
         assert env.responses[0][1]["status"] == "error"
+
+
+# ---------------------------------------------------- WP14: the commands / command_errors pair
+
+
+async def test_accepted_commands_are_counted() -> None:
+    """docs/04 §4.2's `commands`: commands the bridge accepted and acted on, counted after
+    validation and *before* debouncing, so the figure answers "how much is being asked of the
+    bridge?" rather than "how many writes survived the debouncer?" (docs/05 §4.2).
+    """
+    metrics = Metrics()
+    async with _environment(metrics=metrics) as env:
+        payload = orjson.dumps({"state": True, "brightness": 40})
+        await env.outsider.publish(f"{BASE}/dimmer/set", payload)
+        await _wait_until(lambda: metrics.commands >= 2)
+
+    assert metrics.commands == 2
+    assert metrics.command_errors == 0
+
+
+async def test_a_rejected_command_counts_as_an_error_not_as_a_command() -> None:
+    metrics = Metrics()
+    async with _environment(metrics=metrics) as env:
+        await env.outsider.publish(f"{BASE}/switch/set", orjson.dumps({"nonexistent": True}))
+        await _wait_until(lambda: metrics.command_errors >= 1)
+
+    assert metrics.command_errors == 1
+    assert metrics.commands == 0
+
+
+async def test_an_out_of_range_value_counts_as_an_error() -> None:
+    metrics = Metrics()
+    async with _environment(metrics=metrics) as env:
+        payload = orjson.dumps({"brightness": "not a number"})
+        await env.outsider.publish(f"{BASE}/dimmer/set", payload)
+        await _wait_until(lambda: metrics.command_errors >= 1)
+
+    assert metrics.command_errors == 1
+
+
+# --------------------------------------- WP18: a 404 on write means the topology moved under us
+
+
+async def test_a_404_on_write_requests_a_resync() -> None:
+    """docs/06 §4.1's last row: "`404` on a datapoint write -> debounced full resync (topology
+    changed under us)". Named as an unwired gap in `supervisor.py`'s docstring until WP18.
+    """
+    requested = 0
+
+    def _on_topology_changed() -> None:
+        nonlocal requested
+        requested += 1
+
+    async with _environment(on_topology_changed=_on_topology_changed) as env:
+        env.fake.set_error(_dp_path(f"{SERIAL}.ch0000.idp0000"), 404)
+        await env.outsider.publish(f"{BASE}/switch/set", orjson.dumps({"state": True}))
+        await _wait_until(lambda: requested >= 1)
+
+    assert requested == 1
+
+
+async def test_a_400_on_write_does_not_request_a_resync() -> None:
+    """A rejected *value* says nothing about topology; only `404` means the datapoint is gone.
+    Resyncing on every bad command would turn a typo into a config fetch (ADR-007's whole point).
+    """
+    requested = 0
+
+    def _on_topology_changed() -> None:
+        nonlocal requested
+        requested += 1
+
+    async with _environment(on_topology_changed=_on_topology_changed) as env:
+        env.fake.set_error(_dp_path(f"{SERIAL}.ch0000.idp0000"), 400)
+        await env.outsider.publish(f"{BASE}/switch/set", orjson.dumps({"state": True}))
+        await env.collect_responses(count=1)
+
+    assert requested == 0
+
+
+async def test_a_burst_of_404s_still_only_asks_once_per_write() -> None:
+    """The dispatcher only *requests*; debouncing is the Supervisor's `_ReloadDebouncer` (P-55),
+    which already collapses a burst into one resync. This pins the contract that the command path
+    does not do its own retry or fan-out on top of that.
+    """
+    requested = 0
+
+    def _on_topology_changed() -> None:
+        nonlocal requested
+        requested += 1
+
+    async with _environment(debounce_s=0.0, on_topology_changed=_on_topology_changed) as env:
+        env.fake.set_error(_dp_path(f"{SERIAL}.ch0000.idp0000"), 404)
+        for _ in range(3):
+            await env.outsider.publish(f"{BASE}/switch/set", orjson.dumps({"state": True}))
+            await asyncio.sleep(0.05)
+        await _wait_until(lambda: requested >= 1)
+
+    assert 1 <= requested <= 3

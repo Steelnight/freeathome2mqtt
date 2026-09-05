@@ -125,3 +125,157 @@ def test_mark_optimistic_marks_dirty_even_when_the_value_is_unchanged() -> None:
     store.mark_optimistic(0, 0, True, attr_bit=0b1)
     assert store.dirty == {0}
     assert store.unconfirmed[0] == 0b1
+
+
+class _FakeClock:
+    """A monotonic clock under the test's control (docs/06 §6 F20: every timer uses monotonic)."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _entities(count: int) -> list[Entity]:
+    return [_entity(i, ("state", "brightness")) for i in range(count)]
+
+
+# ------------------------------------------- WP14: the per-entity clean -> dirty timestamp
+
+
+def test_first_dirty_at_is_recorded_when_an_entity_becomes_dirty() -> None:
+    """The latency histogram needs to know when an entity *started* waiting to be published
+    (docs/12 WP14). One `monotonic()` call per clean -> dirty transition, not per datapoint.
+    """
+    clock = _FakeClock()
+    store = StateStore(_entities(2), clock=clock)
+
+    clock.now = 100.0
+    assert store.apply(0, 0, "on") is True
+
+    assert store.first_dirty_at[0] == 100.0
+
+
+def test_further_changes_do_not_move_first_dirty_at() -> None:
+    """A burst touching one entity ten times waits from the *first* of those, not the last --
+    otherwise the measured latency would shrink the busier things got.
+    """
+    clock = _FakeClock()
+    store = StateStore(_entities(2), clock=clock)
+
+    clock.now = 100.0
+    store.apply(0, 0, "on")
+    clock.now = 100.5
+    store.apply(0, 1, "off")
+
+    assert store.first_dirty_at[0] == 100.0
+
+
+def test_first_dirty_at_restarts_after_the_entity_is_published() -> None:
+    clock = _FakeClock()
+    store = StateStore(_entities(2), clock=clock)
+
+    clock.now = 100.0
+    store.apply(0, 0, "on")
+    store.dirty.discard(0)  # what Publisher.flush does after a successful publish
+
+    clock.now = 200.0
+    store.apply(0, 0, "off")
+
+    assert store.first_dirty_at[0] == 200.0
+
+
+def test_unchanged_value_does_not_record_a_timestamp() -> None:
+    """R4 gates everything downstream (docs/05 §3): a repeat costs no clock call either."""
+    clock = _FakeClock()
+    store = StateStore(_entities(2), clock=clock)
+
+    clock.now = 100.0
+    store.apply(0, 0, "on")
+    store.dirty.discard(0)
+    clock.now = 200.0
+
+    assert store.apply(0, 0, "on") is False
+    assert store.first_dirty_at[0] == 100.0
+
+
+def test_optimistic_marks_also_start_the_clock() -> None:
+    """An optimistic publish is a publish; its latency counts too (ADR-012)."""
+    clock = _FakeClock()
+    store = StateStore(_entities(2), clock=clock)
+
+    clock.now = 42.0
+    store.mark_optimistic(1, 0, "on", attr_bit=1)
+
+    assert store.first_dirty_at[1] == 42.0
+
+
+# ---------------------------------------------- WP16: last_changed_at, for availability.stale_after
+
+
+def test_last_changed_at_records_when_a_value_actually_changed() -> None:
+    """docs/06 §5.3's staleness counter needs to know when each entity last *changed*.
+
+    Held in a list indexed by entity, alongside `first_dirty_at` -- docs/05 §6 names an unpruned
+    per-entity side dict as a known unbounded-growth trap and prescribes this shape instead.
+    """
+    clock = _FakeClock()
+    store = StateStore(_entities(2), clock=clock)
+
+    clock.now = 100.0
+    store.apply(0, 0, "on")
+
+    assert store.last_changed_at[0] == 100.0
+    assert store.last_changed_at[1] == 0.0
+
+
+def test_an_unchanged_repeat_does_not_refresh_last_changed_at() -> None:
+    """The distinction that makes the counter meaningful: a sensor re-reporting the same value
+    every minute is *not* fresh. R4 already gates this; the timestamp must follow the same gate.
+    """
+    clock = _FakeClock()
+    store = StateStore(_entities(1), clock=clock)
+
+    clock.now = 100.0
+    store.apply(0, 0, "on")
+    clock.now = 500.0
+    store.apply(0, 0, "on")
+
+    assert store.last_changed_at[0] == 100.0
+
+
+def test_seeding_records_last_changed_at_so_startup_is_not_instantly_stale() -> None:
+    """Startup seeds every entity from the config snapshot. Leaving those at 0.0 would report a
+    whole installation as stale the moment the bridge came up.
+    """
+    clock = _FakeClock()
+    clock.now = 100.0
+    store = StateStore(_entities(1), clock=clock)
+
+    store.seed(0, 0, "on")
+
+    assert store.last_changed_at[0] == 100.0
+
+
+def test_stale_entity_count_is_zero_when_nothing_is_stale() -> None:
+    clock = _FakeClock()
+    store = StateStore(_entities(2), clock=clock)
+    clock.now = 100.0
+    store.apply(0, 0, "on")
+    store.apply(1, 0, "on")
+
+    clock.now = 150.0
+    assert store.stale_entity_count(60.0) == 0
+
+
+def test_stale_entity_count_counts_entities_past_the_window() -> None:
+    clock = _FakeClock()
+    store = StateStore(_entities(2), clock=clock)
+    clock.now = 100.0
+    store.apply(0, 0, "on")
+    clock.now = 200.0
+    store.apply(1, 0, "on")
+
+    clock.now = 230.0  # entity 0 last changed 130s ago, entity 1 only 30s ago
+    assert store.stale_entity_count(60.0) == 1

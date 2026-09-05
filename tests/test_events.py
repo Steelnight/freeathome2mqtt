@@ -65,7 +65,7 @@ async def test_events_are_published_to_the_entity_event_topic() -> None:
     async with running_fake_broker() as broker:
         client, task = await _connected_client(broker)
         try:
-            events = EventPublisher(mqtt=client, clock=lambda: fixed)
+            events = EventPublisher(mqtt=client, base_topic=BASE, clock=lambda: fixed)
 
             async with aiomqtt.Client("127.0.0.1", port=broker.port) as observer:
                 await observer.subscribe(f"{BASE}/wall_switch/event")
@@ -93,7 +93,7 @@ async def test_events_are_not_retained() -> None:
     async with running_fake_broker() as broker:
         client, task = await _connected_client(broker)
         try:
-            events = EventPublisher(mqtt=client)
+            events = EventPublisher(mqtt=client, base_topic=BASE)
             await events.emit(entity, attribute="state", value=1, event="press")
             await asyncio.sleep(0.1)
             assert f"{BASE}/wall_switch/event" not in broker.retained_messages
@@ -114,7 +114,7 @@ async def test_two_identical_presses_produce_two_messages() -> None:
     async with running_fake_broker() as broker:
         client, task = await _connected_client(broker)
         try:
-            events = EventPublisher(mqtt=client)
+            events = EventPublisher(mqtt=client, base_topic=BASE)
 
             async with aiomqtt.Client("127.0.0.1", port=broker.port) as observer:
                 await observer.subscribe(f"{BASE}/wall_switch/event")
@@ -132,6 +132,41 @@ async def test_two_identical_presses_produce_two_messages() -> None:
                 await asyncio.wait_for(collector, timeout=5.0)
 
                 assert len(received) == 2  # no dedup, no change detection (ADR-005)
+        finally:
+            await client.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_bridge_event_is_published_under_the_configured_base_topic() -> None:
+    """WP15: `EventPublisher` learned to publish `bridge/event` so `bus/ingress.py` can report a
+    scene trigger. Its base topic must be the configured one -- a default would put a real
+    installation's events on the wrong topic silently.
+    """
+    async with running_fake_broker() as broker:
+        client = MqttClient(
+            host="127.0.0.1",
+            port=broker.port,
+            base_topic="custombase",
+            sysap_serial="ABB7F500E17A",
+            backoff_initial=0.02,
+            backoff_cap=0.2,
+        )
+        task = asyncio.create_task(client.run())
+        await _wait_until(lambda: client.reconnect_count >= 1)
+        try:
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as outsider:
+                await outsider.subscribe("custombase/bridge/event")
+                events = EventPublisher(mqtt=client, base_topic="custombase")
+                await events.emit_bridge_event("scene_triggered", {"serial": "ABB1"})
+
+                async with asyncio.timeout(5.0):
+                    async for message in outsider.messages:
+                        assert str(message.topic) == "custombase/bridge/event"
+                        assert orjson.loads(message.payload) == {
+                            "type": "scene_triggered",
+                            "data": {"serial": "ABB1"},
+                        }
+                        break
         finally:
             await client.stop()
             await asyncio.wait_for(task, timeout=5.0)

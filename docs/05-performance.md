@@ -70,6 +70,17 @@ The WebSocket datapoint key is used *verbatim* as a dict key. No `split`, `rspli
 `startswith`, f-string or `format()` between frame receipt and state update. Everything that needs
 parsing was parsed at compile time.
 
+*One bounded exemption, added with `scenesTriggered` handling (WP15).* A scene frame does not
+carry ready-made datapoint keys: its shape is `sceneSerial → channels → outputs`
+([`docs/01 §5.1`](01-freeathome-api.md#51-frame-schema)), so the composite key is rebuilt with one
+f-string per scene *output*. That cost is bounded by an event that happens when somebody presses a
+scene button — [§4](00-overview-and-decisions.md#4-scale-assumptions) puts scene bursts at 50–200
+frames as an occasional burst, not a sustained rate — and it never touches the steady-state
+datapoint path. The alternative, a second compile-time ingress table keyed by
+`(serial, channel, odp)` tuples, was rejected: a whole additional lookup structure sized with the
+installation, for a rare path, does not clear rule 3's bar for a new collection. Recorded here
+rather than taken silently.
+
 **R3 — No `O(n)` scans per event.**
 Never iterate a channel's outputs to find a pairing, never iterate entities to find a match. Every
 lookup on the hot path is a dict hit or a list index.
@@ -134,11 +145,19 @@ async def publisher_loop(self) -> None:
   makes ordering unpredictable for no throughput gain, since the MQTT client serialises onto one
   socket anyway.
 
-**Adaptive variant** (optional, `coalesce_adaptive: true`): if the batch size exceeds
-`coalesce_burst_threshold` (default 25), grow the next window up to `coalesce_max_ms` (default 200);
-shrink back geometrically when batches are small. This keeps single-button-press latency at ~0 ms
-while making an "all lights off" scene cost one round of publishes. Implement it only after P1–P4
-pass without it, and keep it behind a flag.
+**Adaptive variant** (optional, `coalesce_adaptive: true`, default off): if the batch size
+exceeds `coalesce_burst_threshold` (default 25), grow the next window up to `coalesce_max_ms`
+(default 200); shrink back geometrically when batches are small. This keeps single-button-press
+latency at ~0 ms while making an "all lights off" scene cost one round of publishes.
+
+**Implemented in WP17**, after its stated precondition (P1–P4 passing without it) was met, and
+only once `bench_burst_adaptive` showed it earns its place: a scene arriving as 20 frames over
+~200 ms produces **400 publishes** with fixed coalescing and **160** with adaptive. Growth and
+decay use the same geometric factor — an asymmetric pair would hold the widened window long after
+the burst that justified it, which is precisely what the "shrink back" half exists to prevent. All
+of its state is three configured numbers plus the current window, so it adds no collection that
+grows with events (rule 3). It stays default-off, and the P1/P2/P4 budgets are verified with the
+flag off so nobody who does not opt in pays for it.
 
 ### 4.2 Command debouncing
 
@@ -171,10 +190,18 @@ one is in flight sets a "reload again when done" flag rather than queueing anoth
 
 ## 5. Startup optimisation
 
-**Config cache.** After a successful load, persist the raw config bytes plus their hash to
-`cache/config.json.zst`. On start, fetch the live config, hash it, and if the hash matches, reuse the
-already-parsed compile artefacts. This does not avoid the HTTP fetch (we must know the config is
-current) but it does avoid parse + compile + discovery rendering — roughly 400 ms of the 3 s budget.
+**Config cache — proposed, measured, and dropped (WP17).** The plan here was to persist the raw
+config bytes plus their hash and, on a matching hash, reuse the already-parsed compile artefacts,
+saving "roughly 400 ms of the 3 s budget". Once WP13 made the numbers observable, that estimate
+turned out to be an order of magnitude too high: the compile it would skip measures **~29 ms** at
+1 000 channels (`bench_compile`), and cold start comes in at **~1.16 s** against P6's 3 s budget.
+A cache file, its invalidation, and the §6 hazard of accidentally retaining the parsed
+configuration are not worth under 5 % of a budget with 60 % headroom, so `advanced.cache_config`
+was removed from the schema rather than implemented. The half of the saving that *was* real —
+not republishing unchanged discovery — is already delivered by `DiscoveryStore` (WP10).
+
+This is the estimate being corrected by measurement, which is what
+[§8](#8-benchmarks)'s benchmarks exist for.
 
 **Publish order.** Discovery (QoS 1) before state (QoS 0) before `bridge/state: online`. Home
 Assistant creates entities from discovery and then immediately fills them from the retained state,
@@ -220,7 +247,7 @@ implementing agent copying reference code recognises them.
 | `refresh_state()` doing one HTTP GET per datapoint per channel | `local-abbfreeathome` | Thousands of requests; minutes; can take the SysAP down | One config fetch + diff ([ADR-007](00-overview-and-decisions.md#adr-007)) |
 | `if pairingID == X: elif == Y: ...` chains per event | `local-abbfreeathome` | `O(pairings)` per datapoint, plus `.get()` allocations | Compiled `Binding` ([ADR-004](00-overview-and-decisions.md#adr-004)) |
 | Subscribe `base/#`, filter own publishes via a Set | `zigbee2mqtt` | Doubles broker traffic; unbounded memory; swallows legitimate messages | Narrow subscriptions ([ADR-006](00-overview-and-decisions.md#adr-006)) |
-| Handling only `datapoints` from the WS frame | both | Device add/remove/rename invisible until restart | Handle all frame keys ([`docs/01 §5.1`](01-freeathome-api.md#51-frame-schema)) |
+| Handling only `datapoints` from the WS frame | both | Device add/remove/rename invisible until restart; a triggered scene silently lost | Handle all frame keys ([`docs/01 §5.1`](01-freeathome-api.md#51-frame-schema)) — all six, `scenesTriggered` included, as of WP15 |
 | Fetching config *before* connecting the WS | both | Silent permanent loss of changes in the gap | Connect + buffer first ([`docs/02 §7`](02-architecture.md#7-startup-order)) |
 | Fixed 5 s retry with no backoff or jitter | `local-abbfreeathome` | Reconnect storms against a rebooting SysAP | Exponential backoff + jitter ([`docs/06 §3`](06-resilience.md#3-backoff-policy)) |
 | A property getter per attribute, re-read by callbacks | `local-abbfreeathome` | Indirection per access; callee re-derives what the caller already knew | Positional slots; pass the changed value |
@@ -242,13 +269,27 @@ so they are hermetic and can gate CI.
 | `bench_command_debounce` | 60 `/set` over 2 s on one continuous command | P5 |
 | `bench_startup` | Cold start against a 1 000-channel fixture | P6, P7 |
 | `bench_resync` | Kill the WS for 60 s with changes meanwhile, restore | P8; exactly 1 config request |
-| `bench_memory` | `tracemalloc` + RSS after 10 min steady state | P9; no growth trend over the window |
-| `bench_idle` | 10 min at 0.1 events/s | P10 |
+| `bench_memory` | `tracemalloc` + RSS at 1 000 entities under steady traffic² | P9; no growth trend over the window |
+| `bench_idle` | 0.1 events/s² | P10 |
 | `bench_dedup` | 10 000 frames all repeating current values | P12: zero publishes |
 | `bench_compile` | Compile only, 1 000 / 2 500 channels | P7; near-linear scaling |
 
-Results are written to `bench/results.json` and compared against a committed baseline; CI fails on a
-regression beyond tolerance. This turns the budgets above from aspiration into a contract.
+Results are written to `bench/results.json` (pytest-benchmark's own report, for `bench_compile`)
+and `bench/results-async.json` (`tests/bench/_record.py`, for the async benchmarks); both are
+compared against the committed baseline and CI fails on a regression beyond tolerance. This turns
+the budgets above from aspiration into a contract.
+
+² `bench_memory` and `bench_idle` shorten this document's original 10-minute windows the same way,
+and for the same reason (docs/12 WP13). Both properties are *rates or ratios* -- CPU per wall
+second, RSS growth across a window -- so they are visible within seconds; what a longer window
+adds is confidence about slow drift, which is exactly what the nightly soak test (docs/10 §8)
+covers. `bench_memory` splits the budget in two: the absolute footprint is measured in a clean
+child interpreter (this pytest process carries the harness, an embedded broker and sometimes
+coverage tracing, none of which ship in the container), while the growth trend is measured
+in-process against the real pipeline, where the harness's constant overhead cancels out of the
+ratio. Measured at the time of writing: **48.6 MB** RSS at 1 000 entities (of which ~6.6 MB is the
+compiled model itself, matching §6's table) and **0.04 %** of one core at idle -- both with
+substantial headroom against P9 and P10.
 
 ¹ Reduced from a 60 s soak for the per-PR bench suite (docs/11 WP6): the property under test --
 the coalescing loop's flush cadence keeping pace with the arrival rate, not accumulating a growing

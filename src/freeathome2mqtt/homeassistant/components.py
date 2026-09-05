@@ -40,8 +40,24 @@ _EVENT_TYPE = "press"
 # a documented simplification; a proper preset_mode axis is future work, named not silently
 # dropped. The mapping lives here, at the HA-payload boundary, rather than by renaming this
 # bridge's own published vocabulary (a breaking change for anyone already consuming `hvac_mode`).
-_HVAC_MODE_TO_HA = {"off": "off", "eco": "auto", "heating": "heat", "cooling": "cool"}
-_HA_TO_HVAC_MODE = {ha: ours for ours, ha in _HVAC_MODE_TO_HA.items()}
+_HVAC_MODE_TO_HA = {"off": "off", "eco": "heat", "heating": "heat", "cooling": "cool"}
+"""This bridge's `hvac_mode` vocabulary translated to Home Assistant's `HVACMode` (WP18).
+
+`eco` maps to `heat` rather than to a mode of its own, because in Home Assistant's model eco is
+not an HVAC mode at all -- it is a *preset*, on a separate axis (`_ECO_PRESET` below). WP10 mapped
+it onto `auto` as a documented simplification; the cost was that selecting `auto` in HA asked for
+something free@home does not have, and a controller genuinely in eco reported a mode nobody could
+act on. A controller in eco is heating, on a lowered setpoint, so `heat` is what it is.
+
+Note the mapping is deliberately many-to-one and therefore *not* invertible: `_HA_TO_HVAC_MODE`
+below is built explicitly rather than by inversion, so `heat` from HA means `heating` and never
+silently means `eco` (which is reached through the preset axis instead).
+"""
+
+_HA_TO_HVAC_MODE = {"off": "off", "heat": "heating", "cool": "cooling"}
+
+_ECO_PRESET = "eco"
+_NO_PRESET = "none"
 
 
 class DiscoveryError(Exception):
@@ -251,7 +267,30 @@ def build_climate(ctx: ComponentContext) -> dict[str, Any]:
         payload["modes"] = list(dict.fromkeys(_HVAC_MODE_TO_HA.values()))
         payload["mode_command_topic"] = entity_set_attribute_topic(entity.state_topic, "hvac_mode")
         payload["mode_command_template"] = _dict_lookup_template(_HA_TO_HVAC_MODE, "value", "off")
+        payload.update(_eco_preset_axis(entity.state_topic))
     return payload
+
+
+def _eco_preset_axis(state_topic: str) -> dict[str, Any]:
+    """free@home's eco as Home Assistant's preset axis (docs/12 WP18).
+
+    Reads the same `hvac_mode` this bridge already publishes and reports `eco` or `none`; writes
+    back to the same `hvac_mode` command topic, mapping HA's `eco` preset to our `eco` and
+    anything else to `heating`. The wire vocabulary is unchanged in both directions -- this is
+    purely a translation at the HA boundary, so ADR-009 holds and no other MQTT consumer notices.
+    """
+    return {
+        "preset_modes": [_NO_PRESET, _ECO_PRESET],
+        "preset_mode_state_topic": state_topic,
+        "preset_mode_state_template": (
+            f"{{{{ '{_ECO_PRESET}' if value_json.hvac_mode == '{_ECO_PRESET}' "
+            f"else '{_NO_PRESET}' }}}}"
+        ),
+        "preset_mode_command_topic": entity_set_attribute_topic(state_topic, "hvac_mode"),
+        "preset_mode_command_template": (
+            f"{{{{ '{_ECO_PRESET}' if value == '{_ECO_PRESET}' else 'heating' }}}}"
+        ),
+    }
 
 
 def build_event(ctx: ComponentContext) -> dict[str, Any]:

@@ -1,11 +1,21 @@
 """bench_resync: resync after a WS outage is fast and costs exactly one config request (docs/05
 §1 P8; §8; docs/11 WP8).
 
-The budget is about resync latency and request count once the WebSocket reconnects, not about
-outage duration -- docs/06 §4's diff-and-publish-deltas mechanism does the same fixed amount of
-work (one `GET /api/rest/configuration`, one diff, one publish pass) regardless of how long the WS
-was down. A short simulated outage stands in for docs/05 §8's literal "60 s WS outage", the same
-deviation WP6's `bench_ingest` already documents for its own traffic window.
+The budget is about recovery cost, not outage duration -- docs/06 §4's diff-and-publish-deltas
+mechanism does the same fixed amount of work (one `GET /api/rest/configuration`, one diff, one
+publish pass) regardless of how long the WS was down. A short simulated outage stands in for
+docs/05 §8's literal "60 s WS outage", the same deviation WP6's `bench_ingest` already documents
+for its own traffic window.
+
+**The clock starts at the drop, not at the reconnect (changed in WP13).** It used to start only
+after a poll loop had *observed* `reconnect_count` increase, by which point the resync -- fired
+from the same `on_connected` hook that increments that counter -- had usually already finished:
+the measurement came out at 10-15 microseconds against a 1.5 s budget, so the timing assertion
+was passing without measuring anything, and the test's real content was its request-count
+assertion. Timing the whole outage-to-correct-state recovery instead gives a well-defined
+interval with a defined start, at the cost of including this test's own configured reconnect
+backoff (`link_backoff_initial`, 20 ms here) in the number. That is the honest trade: a budget
+whose start point is "whenever the poller happened to wake up" is not a budget.
 """
 
 from __future__ import annotations
@@ -21,6 +31,8 @@ from fakes.fake_broker import running_fake_broker
 from fakes.fake_sysap import FakeSysAp, running_fake_sysap
 from freeathome2mqtt.model.profiles import load_profile_registry
 from freeathome2mqtt.supervisor import Supervisor, SupervisorConfig
+
+from . import _record
 
 pytestmark = pytest.mark.bench
 
@@ -101,6 +113,7 @@ async def test_bench_resync_after_ws_outage_meets_p8_budget(tmp_path: Path) -> N
 
             # The outage: the WS drops; a change happens on the SysAP while it is disconnected --
             # exactly the scenario a resync has to catch up on once the link comes back.
+            start = time.monotonic()
             await fake.drop_websocket()
             fake.set_datapoint(SERIAL, "ch0000", "odp0000", "1")
 
@@ -111,7 +124,6 @@ async def test_bench_resync_after_ws_outage_meets_p8_budget(tmp_path: Path) -> N
                 ),
                 timeout_seconds=10.0,
             )
-            start = time.monotonic()
 
             idx = supervisor._model.by_id[f"{SERIAL}_ch0000"]
             await _wait_until(
@@ -119,6 +131,7 @@ async def test_bench_resync_after_ws_outage_meets_p8_budget(tmp_path: Path) -> N
                 timeout_seconds=_P8_BUDGET_SECONDS + 5.0,
             )
             elapsed = time.monotonic() - start
+            _record.record("tests/bench/test_bench_resync.py::resync_seconds", elapsed)
 
             assert elapsed <= _P8_BUDGET_SECONDS
             assert fake.request_count(config_path) == requests_before + 1

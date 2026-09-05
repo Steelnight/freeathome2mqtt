@@ -35,6 +35,8 @@ from freeathome2mqtt.model.entity import AttrKind, Binding, Entity
 from freeathome2mqtt.mqtt.client import MqttClient
 from freeathome2mqtt.sysap.ws import WsReader
 
+from . import _record
+
 pytestmark = pytest.mark.bench
 
 SERIAL = "ABB7F500E17A"
@@ -170,7 +172,7 @@ async def _run_sustained_ingest() -> tuple[int, Metrics, StateStore, float]:
             entities=entities,
             ingress_table=_ingress_table(),
             state=state,
-            events=EventPublisher(mqtt=client),
+            events=EventPublisher(mqtt=client, base_topic=BASE),
             metrics=metrics,
         )
         publisher = Publisher(
@@ -203,6 +205,7 @@ async def test_bench_ingest_sustains_5000_dps_without_falling_behind() -> None:
     sent, metrics, state, drain_tail = await _run_sustained_ingest()
 
     achieved_rate = sent / _DURATION_S
+    _record.record("tests/bench/test_bench_ingest.py::drain_tail_seconds", drain_tail)
     assert achieved_rate >= _TARGET_RATE_DPS * 0.9  # P3, with generous scheduling slack
     assert metrics.datapoints_in == sent  # no frame loss
     # "never falls behind by more than 1 window": once traffic stops, the publisher catches up

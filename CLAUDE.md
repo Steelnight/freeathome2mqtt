@@ -11,6 +11,19 @@ work-package plan — lives in [`docs/`](docs/), starting at [`docs/00-overview-
 *what* gets built and in what order ([`docs/11-implementation-plan.md`](docs/11-implementation-plan.md)).
 
 **Current status: [`WP0`](docs/11-implementation-plan.md#wp0--bootstrap)–[`WP12`](docs/11-implementation-plan.md#wp12--release-engineering) landed — every work package in the plan.**
+**[`docs/12`](docs/12-quality-of-life-and-performance.md)'s WP13–WP18 have landed too.**
+In short: the two budgets nothing measured now have benchmarks (48.6 MB RSS at 1 000 entities
+against a 120 MB budget; 0.04 % of one core at idle against 0.5 %), and the relative-regression
+gate covers five benchmarks instead of one; `bridge/info.stats` is complete, including a
+fixed-bucket publish-latency histogram whose memory is constant under a million samples;
+`scenesTriggered` is handled, so all six of docs/01 §5.1's frame keys are; four inert
+`config.yaml` knobs are wired and `test_no_silently_inert_settings` makes the inert set a tested
+fact rather than a docstring claim; adaptive coalescing shipped (400 publishes → 160 under a scene
+ramp) while the configuration cache was measured and **deleted** (the compile it would skip costs
+~29 ms, not the ~400 ms docs/05 §5 estimated); and `--health`, a `404`-on-write resync hook, HA's
+eco preset axis and a Home Assistant add-on close out the operations work. Two things were
+deliberately *not* done and are recorded as such: HA device triggers (docs/04 §6.2 had already
+chosen the `event` platform, with reasons) and the four open decisions in docs/12 §10.
 
 - **WP0** — `pyproject.toml`/`ruff.toml`/strict `mypy`+`pytest` config, the package skeleton
   (docstring-only stubs), CI, the MIT licence decision.

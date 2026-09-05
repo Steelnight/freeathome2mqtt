@@ -113,14 +113,17 @@ jobs:
       - run: uv python install
       - run: uv sync --group dev
       # The full bench suite: every test's own absolute docs/05 §1 budget assertion runs
-      # regardless of whether it goes through pytest-benchmark's `benchmark` fixture.
+      # regardless of whether it goes through pytest-benchmark's `benchmark` fixture. This run
+      # also writes bench/results-async.json via tests/bench/_record.py (docs/12 WP13).
       - run: uv run pytest -m bench --no-cov
       # Only `test_bench_compile` uses the fixture (the rest benchmark async I/O, which the
-      # fixture's synchronous benchmark() call doesn't support -- docs/10 §7) and so is the only
-      # one with a comparable baseline in bench/baseline.json.
+      # fixture's synchronous benchmark() call doesn't support -- docs/10 §7), so it needs its
+      # own run to produce a pytest-benchmark report.
       - run: >
           uv run pytest tests/bench/test_bench_compile.py -m bench --no-cov --benchmark-only
           --benchmark-json=bench/results.json
+      # Both reports are gated together: the fixture's, and the async recorder's.
       - run: >
           uv run python -m freeathome2mqtt.tools.compare_bench
-          --baseline bench/baseline.json --results bench/results.json
+          --baseline bench/baseline.json
+          --results bench/results.json --results bench/results-async.json

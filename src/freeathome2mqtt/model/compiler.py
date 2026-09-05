@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from fnmatch import fnmatch
 from itertools import chain
 from typing import Any, Literal
 
@@ -72,6 +73,14 @@ class CompileOptions:
     # persist here rather than mutating the model directly, so the entity simply doesn't exist
     # in the next `Model` and the existing removed-entity retraction path (P-35) does the rest.
     excluded_entity_ids: frozenset[str] = frozenset()
+    # `entities.exclude` / `entities.include` (docs/07 §2). Distinct from `excluded_entity_ids`
+    # above, which carries runtime, per-entity `entity/options {"enabled": false}` decisions from
+    # entities.json: these two are the user's own static config, and are globs rather than exact
+    # ids. Both match the *stable entity id*, never the topic -- a topic is a slugified friendly
+    # name a rename can change (ADR-010), so matching it would let a rename silently move an
+    # entity in or out of the filter.
+    exclude_patterns: tuple[str, ...] = ()
+    include_patterns: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,6 +314,27 @@ def _match_profile(channel: Channel, function: Function, ctx: _CompileContext) -
     return candidates[0]
 
 
+def _is_filtered_out(entity_id: str, options: CompileOptions) -> bool:
+    """Whether `entity_id` is excluded, by any of the three mechanisms (docs/07 §2, §4.1).
+
+    Order matters and follows docs/07 §2's own wording, "an allowlist applied after exclude":
+    exclude wins over include for an entity named by both. An *empty* include list allows
+    everything -- it is the default, and reading it as "allow nothing" would silently produce a
+    bridge with no entities the first time anyone left the key at its default.
+
+    `fnmatch` globs, not regexes: patterns come from user-owned `config.yaml` rather than from
+    device or MQTT input, but a glob is the smaller, more predictable surface and is what
+    docs/07 §2 describes.
+    """
+    if entity_id in options.excluded_entity_ids:
+        return True
+    if any(fnmatch(entity_id, pattern) for pattern in options.exclude_patterns):
+        return True
+    return bool(options.include_patterns) and not any(
+        fnmatch(entity_id, pattern) for pattern in options.include_patterns
+    )
+
+
 # ------------------------------------------------------------------------- pass 1: collect channels
 
 
@@ -314,7 +344,7 @@ def _collect_one_channel(
     ctx.tally.channels_total += 1
 
     entity_id = f"{device_serial}_{channel_id}"
-    if entity_id in ctx.options.excluded_entity_ids:
+    if _is_filtered_out(entity_id, ctx.options):
         ctx.tally.channels_excluded_by_option += 1
         return None
 

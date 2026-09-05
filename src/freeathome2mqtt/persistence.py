@@ -11,8 +11,9 @@ hash map that lets a restart with an unchanged installation publish zero discove
 longer would (P-35's cross-restart case -- the in-memory old-model-vs-new-model diff in
 `supervisor._diff_and_apply` only catches removals that happen *while this process is running*).
 
-The configuration snapshot cache (docs/05 §5) is still deferred to whichever later work package
-actually needs it, rather than built speculatively ahead of a caller.
+The configuration snapshot cache docs/05 §5 originally proposed is **not** here, and will not be:
+WP17 measured what it would save and dropped it (see docs/05 §5, which now carries the numbers).
+Its useful half -- not republishing unchanged discovery -- is `DiscoveryStore` above.
 """
 
 from __future__ import annotations

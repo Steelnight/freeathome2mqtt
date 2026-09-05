@@ -74,7 +74,13 @@ USER freeathome2mqtt
 # simplification, not a silent gap: the process itself already exits non-zero on
 # TaskDiedTooManyTimesError (docs/02 §3.1), so the container's own restart policy is what recovers
 # from a genuinely dead supervisor loop.
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD ["freeathome2mqtt", "--check-config"]
+# --health probes the *running* bridge: it reads the retained bridge/state the process itself
+# published, so a bridge that is hung but alive fails it. (--check-config, which this used to run,
+# only parses a file and asks the running process nothing.) A dead process is already handled by
+# TaskDiedTooManyTimesError exiting non-zero; this covers the remaining case (docs/06 §6 F2).
+# start-period is generous because bridge/state only goes online after the first full config
+# fetch and compile (docs/02 §7).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD ["freeathome2mqtt", "--health"]
 
 ENTRYPOINT ["freeathome2mqtt"]

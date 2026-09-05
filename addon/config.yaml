@@ -1,0 +1,38 @@
+# Home Assistant add-on manifest (docs/07 §5.3; docs/12 WP18).
+#
+# NOT VERIFIED BY CI. Installing an add-on needs a Home Assistant Supervisor, which no runner in
+# this project's CI has. This file is written against the documented add-on schema and reviewed by
+# hand; the part that carries the actual risk -- turning these options into a config.yaml the
+# bridge accepts -- is `src/freeathome2mqtt/addon.py`, which *is* tested, including the assertion
+# that its output loads through the same `load_settings` the bridge itself uses.
+name: freeathome2mqtt
+version: "0.1.0"
+slug: freeathome2mqtt
+description: Bridge an ABB/Busch-Jaeger free@home SysAP to MQTT
+url: https://github.com/Steelnight/freeathome2mqtt
+arch:
+  - amd64
+  - aarch64
+  - armv7
+init: false        # the image already runs a single foreground process
+map:
+  - config:rw
+# `need`, not `want`: this bridge is useless without a broker, and failing at start with a clear
+# message beats starting and silently publishing nowhere.
+services:
+  - mqtt:need
+options:
+  sysap_host: "https://192.168.1.50"
+  sysap_username: installer
+  sysap_password: ""
+schema:
+  sysap_host: url
+  sysap_username: str
+  sysap_password: password
+  sysap_verify_ssl: bool?
+  sysap_max_inflight: int(1,16)?
+  mqtt_base_topic: str?
+  homeassistant_enabled: bool?
+  entities_include_virtual_devices: bool?
+  performance_coalesce_ms: int(0,1000)?
+  log_level: list(error|warning|info|debug)?

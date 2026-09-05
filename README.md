@@ -3,10 +3,11 @@
 A high-performance bridge between an **ABB / Busch-Jaeger free@home** System Access Point (SysAP)
 and **MQTT**.
 
-> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP11](docs/11-implementation-plan.md#wp11--tier-23-profiles-and-raw-mode)
-> landed.** Bootstrap tooling, the generated pairing/function/parameter/interface code tables, the
-> SysAP settings pre-flight, the capture tool's pseudonymisation, the `minimal`/`typical`/`nasty`
-> configuration fixtures, a real SysAP client (`RestClient`, `WsReader` against a from-scratch fake
+> **Status: [WP0](docs/11-implementation-plan.md#wp0--bootstrap)–[WP12](docs/11-implementation-plan.md#wp12--release-engineering)
+> landed — every work package in the plan.** Bootstrap tooling, the generated
+> pairing/function/parameter/interface code tables, the SysAP settings pre-flight, the capture
+> tool's pseudonymisation, the `minimal`/`typical`/`nasty` configuration fixtures, a real SysAP
+> client (`RestClient`, `WsReader` against a from-scratch fake
 > SysAP), the domain model (codecs, slugify + deterministic collision resolution, the
 > `Entity`/`Binding`/`EgressBinding` runtime shapes, a JSON-Schema-validated profile loader, and the
 > pure `compile()`), a real tier-1 profile set — 15 profiles covering switches, dimmers,
@@ -64,8 +65,17 @@ and **MQTT**.
 > topic that writes straight through with no codec or validation, off by default. Tier-3's
 > "virtual battery/inverter/two-way-meter" needed no new profiles at all — a virtual device
 > reports the same functionIDs a physical one would, so `include_virtual_devices: true` already
-> covers it. The documents under [`docs/`](docs/) are written to be executed by an implementing
-> agent (human or AI) top to bottom, and every module below WP11 is still a docstring-only stub.
+> covers it. WP12 closed the plan out with release engineering: a multi-arch container, the
+> optional Prometheus endpoint, the nightly soak test, benchmark baselines and release
+> automation. The documents under [`docs/`](docs/) are written to be executed by an
+> implementing agent (human or AI) top to bottom; no module is a stub any more, and the work
+> that comes after WP12 — [`docs/12`](docs/12-quality-of-life-and-performance.md)'s WP13–WP18 —
+> has landed as well: the two performance budgets nothing measured now have benchmarks, the
+> `bridge/info` stats are complete (including a constant-memory latency histogram),
+> `scenesTriggered` frames are handled, four inert `config.yaml` knobs are wired with a meta-test
+> stopping the fifth, adaptive coalescing shipped while the configuration cache was measured and
+> dropped, and `--health`, a 404-on-write resync, HA's eco preset axis and a Home Assistant add-on
+> round out the operations work.
 
 ---
 
@@ -102,6 +112,7 @@ embedded device with a chatty, string-typed, hex-keyed protocol and no built-in 
 | 9 | [Pitfalls](docs/09-pitfalls.md) | 40+ catalogued traps with symptom / cause / mitigation / test |
 | 10 | [Testing](docs/10-testing.md) | Fake SysAP, fixtures, property tests, benchmarks, CI |
 | 11 | [Implementation Plan](docs/11-implementation-plan.md) | Work packages WP0–WP12 with acceptance criteria |
+| 12 | [Quality of Life & Performance](docs/12-quality-of-life-and-performance.md) | The plan after WP12: unmeasured budgets, observability, inert knobs, ops polish |
 
 ## Architecture in one picture
 

@@ -346,6 +346,22 @@ def _rtc_config() -> dict[str, Any]:
     )
 
 
+def _rtc_basic_config() -> dict[str, Any]:
+    """A controller with no on/off input, so `room_temperature_controller_basic` claims it: a bare
+    setpoint with nothing to derive a mode -- or a preset -- from.
+    """
+    return _config(
+        {
+            "inputs": {"idp0000": {"pairingID": 51, "value": "21.0"}},
+            "outputs": {
+                "odp0000": {"pairingID": 304, "value": "21.0"},
+                "odp0001": {"pairingID": 305, "value": "0"},
+            },
+        },
+        functionID="a",
+    )
+
+
 def test_build_climate_full_profile_wires_real_mode_topics() -> None:
     # room_temperature_controller has on_off (docs/03 §7's transform makes hvac_mode a real,
     # working attribute+command now) -- mode control must no longer be omitted.
@@ -358,7 +374,7 @@ def test_build_climate_full_profile_wires_real_mode_topics() -> None:
     )
     assert payload["mode_state_topic"] == ctx.entity.state_topic
     assert payload["mode_command_topic"] == f"{ctx.entity.state_topic}/set/hvac_mode"
-    assert set(payload["modes"]) == {"off", "auto", "heat", "cool"}
+    assert set(payload["modes"]) == {"off", "heat", "cool"}
 
 
 def test_build_climate_mode_state_template_maps_our_vocabulary_to_ha() -> None:
@@ -369,18 +385,20 @@ def test_build_climate_mode_state_template_maps_our_vocabulary_to_ha() -> None:
     ctx = _context(config, _compile_one(config))
     payload = build_climate(ctx)
     assert payload["mode_state_template"] == (
-        "{{ {'off': 'off', 'eco': 'auto', 'heating': 'heat', 'cooling': 'cool'}"
+        "{{ {'off': 'off', 'eco': 'heat', 'heating': 'heat', 'cooling': 'cool'}"
         ".get(value_json.hvac_mode, 'off') }}"
     )
 
 
 def test_build_climate_mode_command_template_maps_ha_vocabulary_to_ours() -> None:
+    """No `auto` entry any more: eco moved to the preset axis in WP18, and HA's `heat` must mean
+    `heating` unambiguously rather than sometimes meaning eco.
+    """
     config = _rtc_config()
     ctx = _context(config, _compile_one(config))
     payload = build_climate(ctx)
     assert payload["mode_command_template"] == (
-        "{{ {'off': 'off', 'auto': 'eco', 'heat': 'heating', 'cool': 'cooling'}"
-        ".get(value, 'off') }}"
+        "{{ {'off': 'off', 'heat': 'heating', 'cool': 'cooling'}.get(value, 'off') }}"
     )
 
 
@@ -439,3 +457,49 @@ def test_component_builders_registry_is_closed_and_matches_known_platforms() -> 
         "climate",
         "event",
     }
+
+
+# ------------------------------------------------- WP18: eco as a preset_mode (docs/12 §8)
+
+
+def test_climate_maps_eco_to_a_preset_rather_than_an_hvac_mode() -> None:
+    """WP10 mapped our `eco` onto HA's `auto` HVAC mode, and said so as a documented
+    simplification. HA models eco as a *preset*, on an axis of its own, so a user who selects
+    `auto` in HA gets something that is not what free@home calls eco, and the real eco state is
+    invisible. WP18 gives it the axis it belongs on.
+
+    The wire vocabulary this bridge publishes (`off`/`eco`/`heating`/`cooling`) does not change:
+    the translation stays at the HA discovery boundary, so ADR-009 holds and no existing MQTT
+    consumer is affected.
+    """
+    config = _rtc_config()
+    payload = build_climate(_context(config, _compile_one(config)))
+
+    assert "auto" not in payload["modes"]
+    assert payload["preset_modes"] == ["none", "eco"]
+    assert payload["preset_mode_state_topic"]
+    assert payload["preset_mode_command_topic"]
+
+
+def test_climate_hvac_modes_no_longer_include_the_eco_stand_in() -> None:
+    config = _rtc_config()
+    payload = build_climate(_context(config, _compile_one(config)))
+    assert set(payload["modes"]) == {"off", "heat", "cool"}
+
+
+def test_climate_preset_state_template_reports_eco_only_when_eco_is_set() -> None:
+    config = _rtc_config()
+    payload = build_climate(_context(config, _compile_one(config)))
+    template = payload["preset_mode_state_template"]
+    assert "eco" in template
+    assert "none" in template
+
+
+def test_climate_without_on_off_still_has_no_mode_or_preset_axis() -> None:
+    """`room_temperature_controller_basic` is a bare setpoint with nothing to derive a mode from;
+    it must not grow a preset axis it cannot drive.
+    """
+    config = _rtc_basic_config()
+    payload = build_climate(_context(config, _compile_one(config)))
+    assert "preset_modes" not in payload
+    assert "modes" not in payload

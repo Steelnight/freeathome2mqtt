@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import inspect
 import logging
 import time
@@ -19,7 +20,8 @@ import pytest
 
 from fakes.fake_broker import free_port, running_fake_broker
 from fakes.fake_sysap import FakeSysAp, running_fake_sysap
-from freeathome2mqtt.metrics import Metrics
+from freeathome2mqtt.log import MqttLogHandler
+from freeathome2mqtt.metrics import LatencyHistogram, Metrics
 from freeathome2mqtt.model.compiler import CompileOptions, CompileStats, Model
 from freeathome2mqtt.model.compiler import compile as compile_model
 from freeathome2mqtt.model.entity import AttrKind, Entity
@@ -2301,6 +2303,73 @@ async def test_bridge_info_never_contains_sysap_or_mqtt_secrets(tmp_path: Path) 
             await asyncio.wait_for(task, timeout=5.0)
 
 
+# ----------------------------------------------------- WP14: the complete bridge/info stats
+
+
+async def test_bridge_info_stats_match_documented_shape(tmp_path: Path) -> None:
+    """WP14's acceptance test: every key docs/04 §4.2's example shows is present and typed.
+
+    Before WP14, five of them (`ws_frames`, `state_publishes`, `commands`, `command_errors`,
+    `latency_ms`) had no counter behind them and were simply absent -- which made docs/05 §9's
+    own profiling recipe impossible to follow in production.
+    """
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            # Drive one real datapoint change through the whole pipeline, so the assertions
+            # below are about counters that actually counted something rather than about
+            # keys that merely exist.
+            publishes_before = supervisor.metrics.state_publishes
+            await fake.push_ws_frame({"datapoints": {f"{SERIAL}/ch0000/odp0000": "1"}})
+            await _wait_until(lambda: supervisor.metrics.ws_frames >= 1)
+            await _wait_until(lambda: supervisor.metrics.state_publishes > publishes_before)
+            info = supervisor._build_bridge_info()
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+    stats = info["stats"]
+    for key in (
+        "uptime_s",
+        "ws_frames",
+        "datapoints_in",
+        "unmapped_datapoints",
+        "state_publishes",
+        "events",
+        "commands",
+        "command_errors",
+        "reconnects_ws",
+        "reconnects_mqtt",
+        "config_reloads",
+        "codec_errors",
+        "latency_ms",
+    ):
+        assert key in stats, f"docs/04 §4.2 documents stats.{key}, and it is missing"
+    assert set(stats["latency_ms"]) >= {"p50", "p95", "p99"}
+    # docs/04 §4.2's `config` block shows `homeassistant`; it was the one key the code omitted.
+    assert "homeassistant" in info["config"]
+    # The whole point of the exercise: these are real numbers, not placeholders.
+    assert stats["ws_frames"] >= 1
+    assert stats["state_publishes"] >= 1
+
+
+async def test_bridge_info_latency_is_null_before_anything_has_been_published() -> None:
+    """An empty histogram reports `null`, not `0`: "no samples yet" and "everything took under a
+    millisecond" are different facts and must not render identically.
+    """
+    assert LatencyHistogram().percentiles() == {"p50": None, "p95": None, "p99": None}
+
+
 # ------------------------------------------------------------------------ virtualdevice/create
 
 
@@ -2525,3 +2594,155 @@ async def test_dry_run_picks_up_a_persisted_alias(tmp_path: Path) -> None:
         model = await supervisor.dry_run()
         idx = model.by_id[f"{SERIAL}_ch0000"]
         assert model.entities[idx].state_topic == f"{BASE}/kitchen_light"
+
+
+# ---------------------------------------------------- WP16: stale_after and log_to_mqtt wiring
+
+
+async def test_bridge_info_reports_the_stale_entity_count_when_configured(tmp_path: Path) -> None:
+    """docs/06 §5.3: `availability.stale_after` counts entities that have not changed in that
+    long, and reports the number in `bridge/info`. Accepted and validated since WP9; inert until
+    WP16 because it needed new per-entity state, not just wiring.
+    """
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        config = dataclasses.replace(_config(tmp_path, broker.port, http_client), stale_after_s=0.0)
+        supervisor = Supervisor(config=config, profiles=REGISTRY, http_session=http_client.session)
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            info = supervisor._build_bridge_info()
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+    # stale_after 0 means "everything counts as stale", which is the cheapest way to prove the
+    # counter is actually computed from live state rather than hardcoded.
+    assert info["counts"]["stale_entities"] == info["counts"]["entities"]
+
+
+async def test_bridge_info_omits_the_stale_count_when_stale_after_is_disabled(
+    tmp_path: Path,
+) -> None:
+    """Disabled is the default. Reporting `0` would be indistinguishable from "measured, none
+    stale", so the key is absent instead."""
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            info = supervisor._build_bridge_info()
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+    assert "stale_entities" not in info["counts"]
+
+
+async def test_log_to_mqtt_attaches_a_handler_on_connect_and_detaches_on_shutdown(
+    tmp_path: Path,
+) -> None:
+    """`advanced.log_to_mqtt` was the one gap `cli.py`'s docstring named: `MqttLogHandler` was
+    implemented and tested standalone, but `Supervisor` exposed no hook to attach it once its
+    `MqttClient` existed and detach it before shutdown.
+    """
+    root = logging.getLogger()
+    handlers_before = list(root.handlers)
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        config = dataclasses.replace(_config(tmp_path, broker.port, http_client), log_to_mqtt=True)
+        supervisor = Supervisor(config=config, profiles=REGISTRY, http_session=http_client.session)
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            attached = [h for h in root.handlers if isinstance(h, MqttLogHandler)]
+            assert len(attached) == 1
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+    assert [h for h in root.handlers if isinstance(h, MqttLogHandler)] == []
+    assert root.handlers == handlers_before
+
+
+async def test_log_to_mqtt_off_by_default_attaches_nothing(tmp_path: Path) -> None:
+    root = logging.getLogger()
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            assert [h for h in root.handlers if isinstance(h, MqttLogHandler)] == []
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_a_404_on_a_command_write_triggers_a_debounced_resync(tmp_path: Path) -> None:
+    """docs/06 §4.1's last row, end to end through the real Supervisor (docs/12 WP18).
+
+    Uses the same `_ReloadDebouncer` a topology frame does (P-55), so a burst of failed writes
+    costs one config fetch rather than one each -- which is the whole point of ADR-007.
+    """
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        config = dataclasses.replace(
+            _config(tmp_path, broker.port, http_client),
+            reload_debounce_s=0.05,
+            reload_min_interval_s=0.0,
+        )
+        supervisor = Supervisor(config=config, profiles=REGISTRY, http_session=http_client.session)
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            config_path = "/fhapi/v1/api/rest/configuration"
+            fetches_before = fake.request_count(config_path)
+            fake.set_error(f"/fhapi/v1/api/rest/datapoint/{_UUID}/{SERIAL}.ch0000.idp0000", 404)
+
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as outsider:
+                for _ in range(3):
+                    await outsider.publish(
+                        f"{BASE}/{_switch_topic(supervisor)}/set", orjson.dumps({"state": True})
+                    )
+                    await asyncio.sleep(0.02)
+
+            await _wait_until(
+                lambda: fake.request_count(config_path) > fetches_before, timeout_seconds=5.0
+            )
+            fetches = fake.request_count(config_path) - fetches_before
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+    # Three failed writes, debounced into a small number of resyncs -- not three.
+    assert 1 <= fetches <= 2
+
+
+def _switch_topic(supervisor: Supervisor) -> str:
+    assert supervisor._model is not None
+    return supervisor._model.entities[0].state_topic.rsplit("/", 1)[-1]

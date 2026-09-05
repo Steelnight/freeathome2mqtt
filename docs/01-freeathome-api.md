@@ -315,7 +315,7 @@ A single frame may carry several of these at once. Handling:
 | `devices` | Topology or metadata changed (including `unresponsive` transitions). Schedule a **debounced** config reload (ADR-007). Do not attempt to merge the partial record into the compiled tables — the diff surface is too large to get right. |
 | `devicesAdded` | Same as above; additionally emit `bridge/event` `device_joined`. |
 | `devicesRemoved` | Same; emit `device_leave`, and clean up the removed entities' retained topics and discovery. |
-| `scenesTriggered` | Publish as bridge/entity **events**, non-retained. Also apply the contained output values to state — a scene trigger is often the only notification you get for the channels it drove. **⚠ verify empirically** whether the corresponding `datapoints` entries also arrive; if they do, state application is a harmless no-op thanks to change detection. |
+| `scenesTriggered` | Publish a `bridge/event` `scene_triggered` per scene serial, non-retained, **and** apply the contained output values to state — a scene trigger is often the only notification you get for the channels it drove. Implemented in `bus/ingress.py` (WP15). **⚠ still to verify empirically:** whether the corresponding `datapoints` entries also arrive. The implementation does not depend on the answer — change detection makes the duplicate a no-op either way, which `test_scene_trigger_application_is_idempotent_with_datapoints` asserts — so this marker is about confirming the protocol, not about a behaviour that might be wrong. |
 | `parameters` | Channel/device parameters changed (e.g. a dimmer's min brightness). Debounced config reload. Rare. |
 
 **Both reference implementations handle only `datapoints`.** Devices added, removed or renamed in

@@ -178,18 +178,27 @@ and fails on a regression beyond 25 %, via `tools/compare_bench.py`. Because CI 
 the gate is on **relative** regression, and the absolute budgets in `docs/05 §1` are verified on the
 reference Pi 4 before each release.
 
-**As implemented (WP12), this relative-baseline comparison covers only `test_bench_compile`.** It
-is the sole bench test that is synchronous, CPU-bound work over pure data structures, which is why
-it alone uses pytest-benchmark's `benchmark` fixture (the thing that actually produces the
-JSON-diffable, storage-backed stats this comparison needs). Every other `tests/bench/` module
-benchmarks an async path against the fake SysAP/broker — real socket I/O — where the fixture's
-synchronous `benchmark()` call doesn't apply; those keep asserting directly against their own
-absolute `docs/05 §1` budget with manual `time.perf_counter()` timing, as they always have. CI's
-`bench` job (main branch only, per the table below) runs the **full** `pytest -m bench` suite
-either way, so every budget is still checked on every merge to `main` — it just wasn't run in CI
-at all before WP12. Extending the relative-regression comparison to the async benchmarks (e.g. via
-a hand-rolled timer wrapper matching this project's own "minimal dependency surface" bent) is a
-tracked future improvement, not attempted here.
+`test_bench_compile` is the sole bench test that is synchronous, CPU-bound work over pure data
+structures, which is why it alone uses pytest-benchmark's `benchmark` fixture (the thing that
+produces the JSON-diffable, storage-backed stats that comparison needs). Every other
+`tests/bench/` module benchmarks an async path against the fake SysAP/broker — real socket I/O —
+where the fixture's synchronous `benchmark()` call doesn't apply, so each times itself and asserts
+directly against its own absolute `docs/05 §1` budget.
+
+**WP12 gated only the first of those; WP13 gates both** ([`docs/12`](12-quality-of-life-and-performance.md#3-wp13--measure-what-is-already-claimed)).
+`tests/bench/_record.py` is the hand-rolled recorder this section previously named as a tracked
+future improvement: the async benchmarks call `record()` with what they measured, a session
+fixture writes `bench/results-async.json` in pytest-benchmark's own JSON shape, and
+`tools/compare_bench.py` accepts a repeatable `--results` so both reports are gated as one. It
+reads *every* file given rather than the last, which `test_main_reads_every_results_file_not_just_the_last`
+pins down — a last-wins `--results` would silently drop a whole report's regressions.
+
+What is recorded is deliberately limited to **continuous quantities**: latency, elapsed time, RSS,
+CPU fraction. The exact count invariants (P4's ≤ 40 publishes, P5's ≤ 6 writes, P12's 0 publishes)
+stay purely absolute — a relative "did this grow 25 %?" gate adds nothing on top of "is this still
+exactly 2?". CI's `bench` job (main branch only, per the table below) runs the **full**
+`pytest -m bench` suite either way, so every absolute budget is checked on every merge to `main`
+regardless of the relative gate.
 
 ## 8. Soak test
 
@@ -231,7 +240,10 @@ installation, verify every **⚠ verify empirically** marker in
 
 1. Does an `unresponsive` transition arrive as a `devices` WS frame, or only via config polling?
    (Determines the `config_refresh_interval` default — [`docs/06 §4.1`](06-resilience.md#41-when-to-resync).)
-2. Do `scenesTriggered` frames duplicate the corresponding `datapoints` entries?
+2. Do `scenesTriggered` frames duplicate the corresponding `datapoints` entries? *(WP15 made the
+   answer not matter for correctness — change detection makes a duplicate a no-op, asserted by
+   `test_scene_trigger_application_is_idempotent_with_datapoints` — but the protocol fact is
+   still unconfirmed.)*
 3. Are WS `datapoints` keys always in `odpXXXX` form?
 4. Does the current firmware accept `installer` as the Basic-auth username, or is the `jid` needed?
 5. What is the actual concurrency threshold at which `502`s begin? (Calibrates `max_inflight`.)

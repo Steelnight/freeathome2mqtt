@@ -43,6 +43,11 @@ def record(name: str, value: float) -> None:
     add a second, weaker way for the same test to fail. Continuous quantities (latency, elapsed
     time, RSS, CPU) are the ones where a relative gate catches what an absolute budget with
     headroom cannot.
+
+    `bench_burst_adaptive`'s two publish counts are the one deliberate exception. They are
+    recorded not as an invariant but so the CI log carries the *comparison* that justifies
+    adaptive coalescing existing at all (docs/12 §7.3): 400 publishes fixed against 160 adaptive.
+    They are absent from the baseline, so they are reported and not gated.
     """
     _measurements[name] = value
 

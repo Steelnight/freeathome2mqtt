@@ -13,7 +13,16 @@ Nothing here is speculative. Every item is one of:
 
 [§11](#11-considered-and-not-proposed) lists what was considered and deliberately *not* proposed, so
 the omissions are as visible as the inclusions. [§10](#10-decisions-this-plan-does-not-take) lists
-the four questions that need a maintainer's call before the code that depends on them is written.
+the questions that need a maintainer's call before the code that depends on them is written.
+
+> **Status: all six packages have landed.** Each section below keeps its original reasoning and
+> adds what implementation actually produced — including the three places the plan turned out to
+> be wrong: an out-of-range percentile sentinel that broke its own ordering invariant
+> ([§4.1](#41-what-implementation-changed-about-the-plan)), an HA device-trigger item that
+> contradicted a decision docs/04 §6.2 had already made ([§8.1](#81-as-built)), and a
+> misdiagnosed interpreter-pin problem ([§10.1](#101-the-exact-interpreter-pin--resolved-and-the-plan-was-wrong)).
+> Those are left in rather than tidied away: a plan that only records its correct predictions is
+> not much use to whoever writes the next one.
 
 ---
 
@@ -589,29 +598,35 @@ and WP16's `last_changed_at` are the same per-entity slot and should be built on
 
 ## 10. Decisions this plan does not take
 
-Four questions need a maintainer's call. Each one blocks code, so none of them should be answered
-implicitly by whoever implements the package that trips over it.
+Four questions were listed here as needing a maintainer's call. **§10.1 turned out not to be a
+question at all** — the observation behind it was misdiagnosed, and the correction is recorded
+below rather than deleted. The remaining three still stand, and none should be answered implicitly
+by whoever next trips over them.
 
-### 10.1 The exact interpreter pin
+### 10.1 The exact interpreter pin — resolved, and the plan was wrong
 
 [`docs/00 §5`](00-overview-and-decisions.md#5-technology-stack) pins Python **3.14.7 exactly**, in
 `.python-version` and as `requires-python = "==3.14.7"` in `pyproject.toml`, deliberately, so `uv sync` resolves the
 identical interpreter in dev, CI and the container.
 
-Observed while writing this plan: in an environment whose interpreter index tops out at 3.14.0rc2,
-`uv python install 3.14.7` fails outright ("No download found for request:
-cpython-3.14.7-linux-x86_64-gnu") and **the fast suite cannot be run at all**. That is a wall, not a
-slow path, and it will hit any contributor whose toolchain lags the pin.
+**This section's original diagnosis was wrong, and the correction is more useful than the
+question.** It reported that `uv python install 3.14.7` failed ("No download found for request:
+cpython-3.14.7-linux-x86_64-gnu") and concluded the exact pin made the project unbootstrappable
+wherever that patch was unavailable — recommending that `requires-python` be relaxed to
+`>=3.14,<3.15`. The actual cause was a **stale `uv`**: version 0.8.17 predates 3.14.7's release
+and so had never heard of it. Upgrading `uv` (`pip install -U uv`, 0.8.17 → 0.12.10) resolved the
+interpreter immediately, and every WP13–WP18 measurement in this document was taken on the pinned
+3.14.7.
 
-- **(a) Keep it.** Reproducibility is the stated goal and it is a real goal.
-- **(b) Relax `requires-python` to `>=3.14,<3.15` while keeping `.python-version` at 3.14.7.**
-  Dev, CI and container reproducibility are unchanged — they all read `.python-version` — but a
-  contributor on a nearby patch release can run the suite. **Recommended**: one line in
-  `pyproject.toml` and a sentence in [`docs/00 §5`](00-overview-and-decisions.md#5-technology-stack).
+So the pin stands, and nothing needs deciding: **keep `requires-python = "==3.14.7"` as
+[`docs/00 §5`](00-overview-and-decisions.md#5-technology-stack) argues.** What is worth adding to
+a contributing guide, if one is ever written, is the one-line diagnosis that would have saved the
+detour: *"No download found for request: cpython-X.Y.Z" almost always means `uv` is older than the
+interpreter, not that the interpreter is unavailable.*
 
-It is left as a decision rather than taken here because it edits a documented, argued technology
-choice, and CLAUDE.md §4's "fix the document and say why" is for when reality contradicts a
-document — not a licence to overturn a deliberate call unilaterally.
+The general lesson is the one this plan kept running into from the other direction: a measurement
+that contradicts a plan is worth more than the plan, but only if the measurement's own cause is
+checked before conclusions are drawn from it.
 
 ### 10.2 `homeassistant.legacy_entity_attributes`
 

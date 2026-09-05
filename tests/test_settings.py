@@ -726,12 +726,6 @@ DELIBERATELY_INERT: dict[str, str] = {
         "its payload shape is not specified anywhere in docs/04 §6; specifying or deleting it is "
         "an open decision (docs/12 §10.2)"
     ),
-    "advanced.cache_config": (
-        "the configuration cache is a measurement-gated decision, not yet taken (docs/12 §7.2)"
-    ),
-    "performance.coalesce_adaptive": "adaptive coalescing (docs/12 §7.1)",
-    "performance.coalesce_max_ms": "adaptive coalescing (docs/12 §7.1)",
-    "performance.coalesce_burst_threshold": "adaptive coalescing (docs/12 §7.1)",
     "sysap.reconnect.jitter": (
         "the two link implementations use a fixed full-jitter policy (docs/06 §3); making the "
         "fraction configurable would mean threading it through both, and nothing has asked"
@@ -796,3 +790,48 @@ def test_deliberately_inert_entries_are_real_settings() -> None:
 
 def test_every_inert_entry_carries_a_reason() -> None:
     assert all(reason.strip() for reason in DELIBERATELY_INERT.values())
+
+
+async def test_adaptive_coalescing_settings_reach_the_supervisor_config(tmp_path: Path) -> None:
+    """docs/05 §4.1's three knobs, inert until WP17 measured whether the feature was worth
+    shipping (it publishes 160 messages against fixed coalescing's 400 under a scene ramp).
+    """
+    path = _write(
+        tmp_path,
+        MINIMAL_CONFIG
+        + """
+performance:
+  coalesce_adaptive: true
+  coalesce_max_ms: 150
+  coalesce_burst_threshold: 10
+""",
+    )
+    config = await settings_to_supervisor_config(load_settings(path, environ={}))
+
+    assert config.coalesce_adaptive is True
+    assert config.coalesce_max_ms == 150
+    assert config.coalesce_burst_threshold == 10
+
+
+async def test_adaptive_coalescing_is_off_by_default(tmp_path: Path) -> None:
+    path = _write(tmp_path, MINIMAL_CONFIG)
+    config = await settings_to_supervisor_config(load_settings(path, environ={}))
+    assert config.coalesce_adaptive is False
+
+
+def test_cache_config_is_no_longer_accepted(tmp_path: Path) -> None:
+    """`advanced.cache_config` was removed in WP17 rather than implemented (docs/12 §7.2).
+
+    The measurement did not support it: docs/05 §5 estimated the configuration cache would save
+    "roughly 400 ms of the 3 s budget", but the compile it would skip actually measures ~29 ms at
+    1 000 channels and cold start comes in at ~1.16 s against a 3 s budget. A cache file, its
+    invalidation, and the docs/05 §6 risk of accidentally retaining the parsed configuration, in
+    exchange for under 5 % of a budget with 60 % headroom, is not a trade worth making.
+
+    Since `extra="forbid"` is set, a config file still naming it fails loudly with the field name
+    -- which is the right outcome for a knob that never did anything.
+    """
+    path = _write(tmp_path, MINIMAL_CONFIG + "\nadvanced:\n  cache_config: true\n")
+
+    with pytest.raises(SettingsError, match="cache_config"):
+        load_settings(path, environ={})

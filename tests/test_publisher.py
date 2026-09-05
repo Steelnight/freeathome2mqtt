@@ -406,3 +406,122 @@ async def test_a_failed_publish_counts_neither_a_publish_nor_a_latency_sample() 
     assert metrics.state_publishes == 0
     assert metrics.latency.total == 0
     assert state.dirty == {0}
+
+
+# ------------------------------------------- WP17: adaptive coalescing (docs/05 §4.1, opt-in)
+
+
+def _publisher_with_adaptive(
+    entities: list[Entity], state: StateStore, mqtt: object, **kwargs: object
+) -> Publisher:
+    return Publisher(
+        entities=entities,
+        state=state,
+        mqtt=mqtt,
+        coalesce_ms=20,
+        coalesce_adaptive=True,
+        coalesce_max_ms=200,
+        coalesce_burst_threshold=25,
+        publish_last_changed=False,
+        **kwargs,
+    )
+
+
+def test_adaptive_window_is_the_base_window_until_a_burst_arrives() -> None:
+    entities = _entities(30)
+    state = StateStore(entities)
+    publisher = _publisher_with_adaptive(entities, state, _RecordingMqtt())
+
+    assert publisher.current_coalesce_ms == 20
+
+
+def test_adaptive_window_grows_after_a_batch_over_the_threshold() -> None:
+    """docs/05 §4.1: "if the batch size exceeds `coalesce_burst_threshold` (default 25), grow the
+    next window up to `coalesce_max_ms`"."""
+    entities = _entities(30)
+    state = StateStore(entities)
+    publisher = _publisher_with_adaptive(entities, state, _RecordingMqtt())
+
+    publisher.note_batch_size(30)
+
+    assert publisher.current_coalesce_ms > 20
+
+
+def test_adaptive_window_never_exceeds_coalesce_max_ms() -> None:
+    """The bound is what keeps this from becoming unbounded added latency."""
+    entities = _entities(30)
+    state = StateStore(entities)
+    publisher = _publisher_with_adaptive(entities, state, _RecordingMqtt())
+
+    for _ in range(50):
+        publisher.note_batch_size(500)
+
+    assert publisher.current_coalesce_ms == 200
+
+
+def test_adaptive_window_shrinks_back_when_batches_are_small() -> None:
+    """docs/05 §4.1: "shrink back geometrically when batches are small". Without this, one scene
+    would leave every later single button press paying the burst window's latency.
+    """
+    entities = _entities(30)
+    state = StateStore(entities)
+    publisher = _publisher_with_adaptive(entities, state, _RecordingMqtt())
+
+    for _ in range(10):
+        publisher.note_batch_size(500)
+    grown = publisher.current_coalesce_ms
+    for _ in range(50):
+        publisher.note_batch_size(1)
+
+    assert grown > 20
+    assert publisher.current_coalesce_ms == 20
+
+
+def test_adaptive_window_never_shrinks_below_the_configured_base() -> None:
+    entities = _entities(2)
+    state = StateStore(entities)
+    publisher = _publisher_with_adaptive(entities, state, _RecordingMqtt())
+
+    for _ in range(100):
+        publisher.note_batch_size(0)
+
+    assert publisher.current_coalesce_ms == 20
+
+
+def test_the_window_is_fixed_when_adaptive_is_off() -> None:
+    """Default-off has to mean *identical* behaviour, not merely similar: P1-P4 pass without this
+    feature and must keep passing for everyone who does not opt in.
+    """
+    entities = _entities(30)
+    state = StateStore(entities)
+    publisher = Publisher(entities=entities, state=state, mqtt=_RecordingMqtt(), coalesce_ms=20)
+
+    publisher.note_batch_size(500)
+
+    assert publisher.current_coalesce_ms == 20
+
+
+def test_adaptive_state_is_two_floats_not_a_growing_collection() -> None:
+    """Rule 3: a feature that tracked batch history would be a collection growing with events."""
+    entities = _entities(2)
+    state = StateStore(entities)
+    publisher = _publisher_with_adaptive(entities, state, _RecordingMqtt())
+
+    for size in range(2000):
+        publisher.note_batch_size(size)
+
+    assert isinstance(publisher.current_coalesce_ms, float | int)
+
+
+async def test_adaptive_publisher_still_publishes_every_dirty_entity() -> None:
+    """The window only changes *when* a flush happens, never *what* it publishes."""
+    entities = _entities(5)
+    state = StateStore(entities)
+    mqtt = _RecordingMqtt()
+    publisher = _publisher_with_adaptive(entities, state, mqtt)
+
+    for idx in range(5):
+        state.apply(idx, 0, f"v{idx}")
+    await publisher.flush()
+
+    assert len(mqtt.published) == 5

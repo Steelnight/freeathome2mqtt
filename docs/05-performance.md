@@ -145,11 +145,19 @@ async def publisher_loop(self) -> None:
   makes ordering unpredictable for no throughput gain, since the MQTT client serialises onto one
   socket anyway.
 
-**Adaptive variant** (optional, `coalesce_adaptive: true`): if the batch size exceeds
-`coalesce_burst_threshold` (default 25), grow the next window up to `coalesce_max_ms` (default 200);
-shrink back geometrically when batches are small. This keeps single-button-press latency at ~0 ms
-while making an "all lights off" scene cost one round of publishes. Implement it only after P1–P4
-pass without it, and keep it behind a flag.
+**Adaptive variant** (optional, `coalesce_adaptive: true`, default off): if the batch size
+exceeds `coalesce_burst_threshold` (default 25), grow the next window up to `coalesce_max_ms`
+(default 200); shrink back geometrically when batches are small. This keeps single-button-press
+latency at ~0 ms while making an "all lights off" scene cost one round of publishes.
+
+**Implemented in WP17**, after its stated precondition (P1–P4 passing without it) was met, and
+only once `bench_burst_adaptive` showed it earns its place: a scene arriving as 20 frames over
+~200 ms produces **400 publishes** with fixed coalescing and **160** with adaptive. Growth and
+decay use the same geometric factor — an asymmetric pair would hold the widened window long after
+the burst that justified it, which is precisely what the "shrink back" half exists to prevent. All
+of its state is three configured numbers plus the current window, so it adds no collection that
+grows with events (rule 3). It stays default-off, and the P1/P2/P4 budgets are verified with the
+flag off so nobody who does not opt in pays for it.
 
 ### 4.2 Command debouncing
 
@@ -182,10 +190,18 @@ one is in flight sets a "reload again when done" flag rather than queueing anoth
 
 ## 5. Startup optimisation
 
-**Config cache.** After a successful load, persist the raw config bytes plus their hash to
-`cache/config.json.zst`. On start, fetch the live config, hash it, and if the hash matches, reuse the
-already-parsed compile artefacts. This does not avoid the HTTP fetch (we must know the config is
-current) but it does avoid parse + compile + discovery rendering — roughly 400 ms of the 3 s budget.
+**Config cache — proposed, measured, and dropped (WP17).** The plan here was to persist the raw
+config bytes plus their hash and, on a matching hash, reuse the already-parsed compile artefacts,
+saving "roughly 400 ms of the 3 s budget". Once WP13 made the numbers observable, that estimate
+turned out to be an order of magnitude too high: the compile it would skip measures **~29 ms** at
+1 000 channels (`bench_compile`), and cold start comes in at **~1.16 s** against P6's 3 s budget.
+A cache file, its invalidation, and the §6 hazard of accidentally retaining the parsed
+configuration are not worth under 5 % of a budget with 60 % headroom, so `advanced.cache_config`
+was removed from the schema rather than implemented. The half of the saving that *was* real —
+not republishing unchanged discovery — is already delivered by `DiscoveryStore` (WP10).
+
+This is the estimate being corrected by measurement, which is what
+[§8](#8-benchmarks)'s benchmarks exist for.
 
 **Publish order.** Discovery (QoS 1) before state (QoS 0) before `bridge/state: online`. Home
 Assistant creates entities from discovery and then immediately fills them from the retained state,

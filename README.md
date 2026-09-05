@@ -69,8 +69,13 @@ and **MQTT**.
 > optional Prometheus endpoint, the nightly soak test, benchmark baselines and release
 > automation. The documents under [`docs/`](docs/) are written to be executed by an
 > implementing agent (human or AI) top to bottom; no module is a stub any more, and the work
-> that comes after WP12 is planned in
-> [`docs/12`](docs/12-quality-of-life-and-performance.md).
+> that comes after WP12 — [`docs/12`](docs/12-quality-of-life-and-performance.md)'s WP13–WP18 —
+> has landed as well: the two performance budgets nothing measured now have benchmarks, the
+> `bridge/info` stats are complete (including a constant-memory latency histogram),
+> `scenesTriggered` frames are handled, four inert `config.yaml` knobs are wired with a meta-test
+> stopping the fifth, adaptive coalescing shipped while the configuration cache was measured and
+> dropped, and `--health`, a 404-on-write resync, HA's eco preset axis and a Home Assistant add-on
+> round out the operations work.
 
 ---
 

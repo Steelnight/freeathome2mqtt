@@ -404,6 +404,11 @@ stale before anything has had a chance to change.
 
 ## 7. WP17 — Adaptive coalescing and the configuration cache
 
+> **Landed, with opposite outcomes — as designed.** Adaptive coalescing shipped (400 publishes →
+> 160 under a scene ramp). The configuration cache was **deleted**: the compile it would skip
+> measures ~29 ms, not the ~400 ms docs/05 §5 estimated.
+
+
 Two optimisations that [`docs/05`](05-performance.md) specifies, that have knobs, and that nobody
 has built. They are packaged together because they need the same decision procedure and they have
 **opposite expected outcomes** — which is the point of running them after WP13.
@@ -451,9 +456,33 @@ config, and WP13's `bench_memory` is what would catch that mistake.
 
 **Size** S (7.1) + S (7.2, mostly measurement and a decision).
 
+### 7.3 The outcomes
+
+**7.1 shipped.** `bench_burst_adaptive` measures the scenario the feature exists for — a scene
+arriving as 20 frames over ~200 ms, repeatedly touching the same 40 entities, which is how a real
+free@home scene reports rather than as one 500-datapoint frame. Fixed 20 ms coalescing produces
+**400 publishes**; adaptive produces **160**. The bench asserts the improvement rather than merely
+that the code runs, because "it still works" would have let an inert feature ship.
+
+**7.2 was deleted.** docs/05 §5 estimated the configuration cache at "roughly 400 ms of the 3 s
+budget". With WP13's measurements available, the compile it would skip is **~29 ms** at 1 000
+channels and cold start is **~1.16 s** against a 3 s budget. That is under 5 % of a budget with
+60 % headroom, in exchange for a cache file, its invalidation, and the
+[`docs/05 §6`](05-performance.md#6-memory) hazard of accidentally retaining the parsed
+configuration. `advanced.cache_config` is gone from the schema, docs/05 §5 now carries the real
+numbers instead of the estimate, and `test_cache_config_is_no_longer_accepted` pins the decision
+so it reads as deliberate rather than as an oversight.
+
+Both halves went the way the plan said they might, which is the point of having written the
+criterion down before measuring rather than after.
+
 ---
 
 ## 8. WP18 — Operations and Home Assistant polish
+
+> **Landed**, with one item dropped on inspection: HA device triggers, which
+> [`docs/04 §6.2`](04-mqtt-interface.md#62-component-mapping) had already decided against for
+> good reasons (see below).
 
 **Why now** These are user-facing rough edges rather than architecture. They come last because the
 device-trigger item depends on WP15, and because the `preset_mode` change rewrites a discovery
@@ -481,15 +510,56 @@ early and twice.
   vocabulary this bridge publishes (`off`/`eco`/`heating`/`cooling`) does not change — only the HA
   boundary translation does, which is what keeps [ADR-009](00-overview-and-decisions.md#adr-009)
   intact.
-- **HA device triggers for button and scene events.** The `event` component works today; device
-  triggers are the idiomatic way to bind a wall switch to an automation in HA, and they are what a
-  user coming from the native integration expects. Depends on WP15 for the scene half.
+- ~~**HA device triggers for button and scene events.**~~ **Dropped, and the plan was wrong to
+  propose it.** [`docs/04 §6.2`](04-mqtt-interface.md#62-component-mapping) had already made this
+  call in the opposite direction — "switch sensor / trigger / door ring → `event`: HA's `event`
+  platform, the right fit for edges" — with reasons. Publishing device triggers *as well* would
+  report every button press twice, once as an `event` entity and once as a device trigger, and an
+  automation author would have to know which to bind. This item was written without checking that
+  row; recording the mistake is more useful than quietly deleting the line.
 - **The Home Assistant add-on wrapper** — WP12's own optional, unbuilt deliverable, specified in
   [`docs/07 §5.3`](07-configuration.md#53-home-assistant-add-on) and named as unattempted in
   `release.yml`'s header. It removes every configuration step for the largest user group, and it
   needs no changes to the bridge itself.
 
 **Size** M–L, and the most separable package here: any of the five can land alone.
+
+### 8.1 As built
+
+**`--health`** reads the retained `bridge/state` and exits 0 only on `online`. Because that topic
+is end-to-end health rather than broker connectivity ([ADR-008](00-overview-and-decisions.md#adr-008)),
+a bridge whose SysAP link has died fails the check while still connected to MQTT — which is the
+point. The container `HEALTHCHECK` now runs it, with a longer `start-period` because
+`bridge/state` only goes online after the first full fetch and compile. Every failure path exits
+non-zero with a logged reason rather than raising: unreachable broker, no retained message,
+unparseable payload.
+
+**The `404`-on-write hook** reaches the same `_ReloadDebouncer` a topology frame uses (P-55), so
+three failed writes cost one config fetch, not three — which is the whole of ADR-007's argument.
+Only `404` triggers it: a rejected *value* says nothing about topology, and resyncing on every bad
+command would turn a typo into a config fetch.
+
+**The eco preset** turned out to be a slightly larger correction than "add an axis". The WP10
+mapping sent our `eco` to HA's `auto`, which meant selecting `auto` in HA asked for something
+free@home does not have. Now `eco` maps to `heat` on the mode axis and is reported and set through
+a proper `preset_mode` axis. The mapping is deliberately many-to-one and therefore no longer
+invertible, so `_HA_TO_HVAC_MODE` is written out explicitly rather than derived — HA's `heat` must
+mean `heating` and never silently mean `eco`. The wire vocabulary this bridge publishes is
+unchanged, so [ADR-009](00-overview-and-decisions.md#adr-009) holds and no other MQTT consumer
+notices.
+
+**The add-on** exists, with its risky part in tested Python. An add-on's bugs live in turning
+`options.json` plus the Supervisor's MQTT credentials into a config file — a missing option, a
+null overriding a good default, an `ssl: true` service still handed an `mqtt://` URL. In `jq` and
+`sed` inside `run.sh` none of that is testable; in `addon.py` all of it is, including the
+assertion that matters most: the generated file loads through the same `load_settings` the bridge
+itself uses. `run.sh` is three lines as a result.
+
+**What is not verified:** the add-on *manifest* and its installation need a Home Assistant
+Supervisor, which no runner here has. `addon/config.yaml` says so in its own header. This is the
+same honest limitation WP12 recorded for the `Dockerfile` — and that one turned out to hide two
+real bugs until CI could actually build it, which is exactly why the note is here rather than
+only in a commit message.
 
 ---
 

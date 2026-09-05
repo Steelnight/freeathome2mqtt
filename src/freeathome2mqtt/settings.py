@@ -212,7 +212,6 @@ class AdvancedSection(BaseModel):
     log_to_mqtt: bool = False
     log_format: Literal["text", "json"] = "text"
     raw_mode: Literal[False, "unsupported_only", True] = False
-    cache_config: bool = True
     metrics: MetricsSection = Field(default_factory=MetricsSection)
 
 
@@ -285,7 +284,7 @@ def _validate_base_topic(base_topic: str) -> None:
         )
 
 
-def _parse_mqtt_server(server: str) -> tuple[str, int]:
+def parse_mqtt_server(server: str) -> tuple[str, int]:
     parsed = urlparse(server)
     if parsed.scheme not in _MQTT_DEFAULT_PORTS or not parsed.hostname:
         raise SettingsError(
@@ -443,7 +442,7 @@ async def settings_to_supervisor_config(settings: Settings) -> SupervisorConfig:
     """The one-way translation `SupervisorConfig`'s own docstring names as settings.py's job."""
     sysap_ssl = await build_sysap_ssl(settings.sysap)
     mqtt_tls = await _build_mqtt_tls(settings.mqtt)
-    mqtt_host, mqtt_port = _parse_mqtt_server(settings.mqtt.server)
+    mqtt_host, mqtt_port = parse_mqtt_server(settings.mqtt.server)
 
     configured = set(settings.entities.interfaces) - {_UNDEFINED_INTERFACE}
     excluded_interfaces = frozenset(_KNOWN_INTERFACES - configured)
@@ -477,6 +476,9 @@ async def settings_to_supervisor_config(settings: Settings) -> SupervisorConfig:
         ),
         data_dir=settings.advanced.data_dir,
         coalesce_ms=settings.performance.coalesce_ms,
+        coalesce_adaptive=settings.performance.coalesce_adaptive,
+        coalesce_max_ms=settings.performance.coalesce_max_ms,
+        coalesce_burst_threshold=settings.performance.coalesce_burst_threshold,
         publish_last_changed=settings.entities.publish_last_changed,
         command_debounce_s=settings.performance.command_debounce_ms / 1000,
         default_optimistic=settings.performance.optimistic,

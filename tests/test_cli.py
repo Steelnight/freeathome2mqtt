@@ -387,3 +387,81 @@ async def test_no_secrets_in_logs_or_bridge_info_during_a_real_startup(tmp_path:
         all_payloads = b"".join(seen.values())
         assert sentinel_sysap_password.encode() not in all_payloads
         assert sentinel_mqtt_password.encode() not in all_payloads
+
+
+# ------------------------------------------------------------ WP18: --health (docs/07 §3)
+
+
+async def test_health_exits_zero_when_the_bridge_reports_online(tmp_path: Path) -> None:
+    """`--health` reads the retained `bridge/state` a *running* bridge published (ADR-008).
+
+    The container HEALTHCHECK ran `--check-config` before WP18: it parses a file and asks the
+    running process nothing, so a bridge that was hung but alive passed it. This closes exactly
+    that case (docs/06 §6 F2's failure mode).
+    """
+    async with running_fake_broker() as broker:
+        async with aiomqtt.Client("127.0.0.1", port=broker.port) as publisher:
+            await publisher.publish(
+                "freeathome2mqtt/bridge/state", orjson.dumps({"state": "online"}), retain=True
+            )
+
+        config_path = _write_config(
+            tmp_path, sysap_url="https://192.168.1.50", mqtt_port=broker.port
+        )
+        args = cli._build_arg_parser().parse_args(["--config", str(config_path), "--health"])
+        exit_code = await cli._async_main(args)
+
+    assert exit_code == 0
+
+
+async def test_health_exits_non_zero_when_the_bridge_reports_offline(tmp_path: Path) -> None:
+    """`bridge/state` is end-to-end health, not MQTT connectivity (ADR-008): a bridge whose SysAP
+    link is dead publishes `offline` while still connected to the broker, and that is precisely
+    the state a healthcheck must fail on.
+    """
+    async with running_fake_broker() as broker:
+        async with aiomqtt.Client("127.0.0.1", port=broker.port) as publisher:
+            await publisher.publish(
+                "freeathome2mqtt/bridge/state", orjson.dumps({"state": "offline"}), retain=True
+            )
+
+        config_path = _write_config(
+            tmp_path, sysap_url="https://192.168.1.50", mqtt_port=broker.port
+        )
+        args = cli._build_arg_parser().parse_args(["--config", str(config_path), "--health"])
+        exit_code = await cli._async_main(args)
+
+    assert exit_code == 1
+
+
+async def test_health_exits_non_zero_when_no_retained_state_exists(tmp_path: Path) -> None:
+    """No retained `bridge/state` means no bridge has ever successfully started against this
+    broker -- which is unhealthy, not "unknown, assume fine".
+    """
+    async with running_fake_broker() as broker:
+        config_path = _write_config(
+            tmp_path, sysap_url="https://192.168.1.50", mqtt_port=broker.port
+        )
+        args = cli._build_arg_parser().parse_args(
+            ["--config", str(config_path), "--health", "--health-timeout", "0.5"]
+        )
+        exit_code = await cli._async_main(args)
+
+    assert exit_code == 1
+
+
+async def test_health_exits_non_zero_when_the_broker_is_unreachable(tmp_path: Path) -> None:
+    """An unreachable broker is a failed healthcheck, not a traceback."""
+    # Nothing listens on port 1.
+    config_path = _write_config(tmp_path, sysap_url="https://192.168.1.50", mqtt_port=1)
+    args = cli._build_arg_parser().parse_args(
+        ["--config", str(config_path), "--health", "--health-timeout", "0.5"]
+    )
+    exit_code = await cli._async_main(args)
+
+    assert exit_code == 1
+
+
+def test_health_is_mutually_exclusive_with_the_other_modes() -> None:
+    with pytest.raises(SystemExit):
+        cli._build_arg_parser().parse_args(["--health", "--dry-run"])

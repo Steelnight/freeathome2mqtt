@@ -2698,3 +2698,51 @@ async def test_log_to_mqtt_off_by_default_attaches_nothing(tmp_path: Path) -> No
         finally:
             await supervisor.stop()
             await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_a_404_on_a_command_write_triggers_a_debounced_resync(tmp_path: Path) -> None:
+    """docs/06 §4.1's last row, end to end through the real Supervisor (docs/12 WP18).
+
+    Uses the same `_ReloadDebouncer` a topology frame does (P-55), so a burst of failed writes
+    costs one config fetch rather than one each -- which is the whole point of ADR-007.
+    """
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        config = dataclasses.replace(
+            _config(tmp_path, broker.port, http_client),
+            reload_debounce_s=0.05,
+            reload_min_interval_s=0.0,
+        )
+        supervisor = Supervisor(config=config, profiles=REGISTRY, http_session=http_client.session)
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            config_path = "/fhapi/v1/api/rest/configuration"
+            fetches_before = fake.request_count(config_path)
+            fake.set_error(f"/fhapi/v1/api/rest/datapoint/{_UUID}/{SERIAL}.ch0000.idp0000", 404)
+
+            async with aiomqtt.Client("127.0.0.1", port=broker.port) as outsider:
+                for _ in range(3):
+                    await outsider.publish(
+                        f"{BASE}/{_switch_topic(supervisor)}/set", orjson.dumps({"state": True})
+                    )
+                    await asyncio.sleep(0.02)
+
+            await _wait_until(
+                lambda: fake.request_count(config_path) > fetches_before, timeout_seconds=5.0
+            )
+            fetches = fake.request_count(config_path) - fetches_before
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+    # Three failed writes, debounced into a small number of resyncs -- not three.
+    assert 1 <= fetches <= 2
+
+
+def _switch_topic(supervisor: Supervisor) -> str:
+    assert supervisor._model is not None
+    return supervisor._model.entities[0].state_topic.rsplit("/", 1)[-1]

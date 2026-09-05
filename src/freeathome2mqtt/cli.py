@@ -1,17 +1,17 @@
 """Argument parsing, config discovery and ``uvloop`` install (docs/07 §3; docs/11 WP9).
 
 `main()` is the process entry point (`python -m freeathome2mqtt`, the `freeathome2mqtt` console
-script). It resolves `config.yaml` through `settings.py`, then dispatches to one of five modes:
+script). It resolves `config.yaml` through `settings.py`, then dispatches to one of six modes:
 `--check-config` (validate and exit), `--discover` (mDNS scan, needs no config file at all),
 `--capture PATH` (record a pseudonymised fixture), `--dry-run` (connect, fetch, compile, print --
-publish nothing, via `Supervisor.dry_run()`, which never constructs an `MqttClient`), or the
-default: run the bridge until a signal or `bridge/request/restart` asks it to stop.
+publish nothing, via `Supervisor.dry_run()`, which never constructs an `MqttClient`), `--health`
+(probe a *running* bridge's retained `bridge/state`; what the container `HEALTHCHECK` runs, WP18),
+or the default: run the bridge until a signal or `bridge/request/restart` asks it to stop.
 
-Not wired here, by design: `advanced.log_to_mqtt`. `configure_logging()` runs before any
-`MqttClient` exists (secrets must be redacted from the log from the very first line), and
-`Supervisor` does not yet expose a hook to attach a handler once its `MqttClient` connects and
-detach it before shutdown. `log.MqttLogHandler` is fully implemented and tested standalone
-(`tests/test_log.py`) -- this is the one real, named integration gap left for that hook to land in.
+`advanced.log_to_mqtt` is no longer a gap here: `configure_logging()` still runs before any
+`MqttClient` exists, because secrets must be redacted from the very first log line (P-45), and
+WP16 gave `Supervisor` the hook this docstring used to ask for -- it attaches
+`log.MqttLogHandler` once MQTT connects and detaches it before shutdown.
 """
 
 from __future__ import annotations
@@ -26,6 +26,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
+import aiomqtt
+import orjson
 
 try:
     import uvloop
@@ -34,11 +36,13 @@ except ImportError:  # pragma: no cover -- exercised only on platforms without u
 
 from freeathome2mqtt import log
 from freeathome2mqtt.model.profiles import load_profile_registry
+from freeathome2mqtt.mqtt import topics
 from freeathome2mqtt.settings import (
     Settings,
     SettingsError,
     build_sysap_ssl,
     load_settings,
+    parse_mqtt_server,
     settings_to_supervisor_config,
 )
 from freeathome2mqtt.supervisor import Supervisor, TaskDiedTooManyTimesError
@@ -58,6 +62,12 @@ _BUILT_IN_PROFILES_DIR = Path(__file__).resolve().parent / "profiles"
 _LOG_LEVEL_CHOICES = ("error", "warning", "info", "debug")
 _CAPTURE_WINDOW_S = 30.0
 _STOP_SIGNALS = (signal.SIGTERM, signal.SIGINT)
+
+_DEFAULT_HEALTH_TIMEOUT_S = 5.0
+"""How long `--health` waits for the retained `bridge/state`. A retained message arrives on
+subscribe, so this is a connection budget rather than a poll interval -- generous enough for a
+loaded broker, short enough to stay inside a container healthcheck's own timeout.
+"""
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -89,6 +99,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     mode.add_argument(
         "--capture", type=Path, default=None, metavar="PATH", help="record a pseudonymised fixture"
+    )
+    mode.add_argument(
+        "--health",
+        action="store_true",
+        help="probe a running bridge's retained bridge/state and exit 0 only if it is online",
+    )
+    parser.add_argument(
+        "--health-timeout",
+        type=float,
+        default=_DEFAULT_HEALTH_TIMEOUT_S,
+        help="seconds to wait for the retained bridge/state message (--health only)",
     )
     return parser
 
@@ -206,7 +227,78 @@ async def _run_supervisor(supervisor: Supervisor) -> int:
     return 1 if fatal or supervisor.restart_requested else 0
 
 
+async def _run_health(settings: Settings, *, timeout_s: float) -> int:
+    """`--health` (docs/07 §3): is the *running* bridge healthy? (docs/12 WP18.)
+
+    Reads the retained `<base>/bridge/state` and succeeds only on `online`. That topic is
+    end-to-end health, not broker connectivity (ADR-008): a bridge whose SysAP link has died
+    publishes `offline` while still connected to MQTT, and that is exactly the state a
+    healthcheck has to fail on.
+
+    What this closes, precisely: the container HEALTHCHECK used to run `--check-config`, which
+    parses a file and asks the running process nothing, so a hung-but-alive bridge passed it
+    (docs/06 §6 F2). A *dead* process is already handled -- `TaskDiedTooManyTimesError` makes it
+    exit non-zero and the restart policy takes over -- so this is the remaining case, not a
+    replacement for that one.
+
+    Every failure is a non-zero exit with a logged reason: an unreachable broker, no retained
+    message within the timeout, an unparseable payload. A healthcheck that raised would be
+    reported by the container runtime as a failure anyway, but without saying why.
+    """
+    host, port = parse_mqtt_server(settings.mqtt.server)
+    topic = topics.bridge_state_topic(settings.mqtt.base_topic)
+    try:
+        async with (
+            asyncio.timeout(timeout_s),
+            aiomqtt.Client(
+                host,
+                port=port,
+                username=settings.mqtt.user,
+                password=settings.mqtt.password,
+            ) as client,
+        ):
+            await client.subscribe(topic)
+            async for message in client.messages:
+                return _health_exit_code(message.payload, topic)
+    except (aiomqtt.MqttError, OSError) as exc:
+        logger.error("health check could not reach the broker at %s:%s: %s", host, port, exc)
+        return 1
+    except TimeoutError:
+        logger.error(
+            "health check timed out after %.1fs with no retained message on %s; "
+            "no bridge has published its state to this broker",
+            timeout_s,
+            topic,
+        )
+        return 1
+    return 1  # pragma: no cover -- messages() only exits via the return or an exception above
+
+
+def _health_exit_code(payload: bytes | bytearray | str | None, topic: str) -> int:
+    if not isinstance(payload, bytes | bytearray):
+        logger.error("health check: %s carried a non-binary payload", topic)
+        return 1
+    try:
+        body = orjson.loads(payload)
+    except orjson.JSONDecodeError:
+        logger.error("health check: %s is not valid JSON", topic)
+        return 1
+    state = body.get("state") if isinstance(body, dict) else None
+    if state == "online":
+        logger.info("health check: bridge is online")
+        return 0
+    logger.error("health check: bridge reports %r on %s", state, topic)
+    return 1
+
+
 async def _async_main(args: argparse.Namespace) -> int:
+    """Load configuration, set logging up, then hand off to `_dispatch_mode`.
+
+    Split in two because the modes outgrew one function's return budget when `--health` landed
+    (CLAUDE.md §2 rule 4: that is a signal to split, not to silence the check). The division is a
+    real one rather than cosmetic: everything here happens before any mode runs, and `--discover`
+    is above it because it is the one mode that needs no config file at all.
+    """
     if args.discover:
         return await _run_discover()
 
@@ -221,10 +313,17 @@ async def _async_main(args: argparse.Namespace) -> int:
         log_format=settings.advanced.log_format,
         secrets=[settings.sysap.password, settings.mqtt.password],
     )
+    return await _dispatch_mode(args, settings)
 
+
+async def _dispatch_mode(args: argparse.Namespace, settings: Settings) -> int:
+    """The config-dependent modes, in the order docs/07 §3 documents them."""
     if args.check_config:
         logger.info("configuration OK: %s", args.config)
         return 0
+
+    if args.health:
+        return await _run_health(settings, timeout_s=args.health_timeout)
 
     if args.capture is not None:
         return await _run_capture(settings, args.capture)

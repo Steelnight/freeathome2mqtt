@@ -364,7 +364,7 @@ Points that matter:
 | movement detector | `binary_sensor` + `sensor` | occupancy + the brightness value it also reports |
 | smoke / CO detector | `binary_sensor` | `device_class: smoke` / `carbon_monoxide` |
 | temperature / brightness / humidity / CO₂ / VOC | `sensor` | `state_class: measurement` |
-| room temperature controller | `climate` | Modes derived by a transform |
+| room temperature controller | `climate` | Modes derived by a transform; free@home's `eco` is published on HA's **`preset_mode`** axis, not as an HVAC mode (WP18) — HA has no eco mode, and a controller in eco *is* heating on a lowered setpoint |
 | valve / heating actuator | `valve` or `number` | Percentage actuation |
 | door opener | `lock` | |
 | switch sensor / trigger / door ring | `event` | HA's `event` platform — the right fit for edges |

@@ -102,7 +102,6 @@ advanced:
   log_to_mqtt: false
   log_format: text                  # text | json
   raw_mode: false                   # false | unsupported_only | true
-  cache_config: true
   metrics:
     enabled: false
     port: 9102
@@ -161,6 +160,7 @@ nightmare.
 ```
 freeathome2mqtt [--config PATH] [--data-dir PATH] [--log-level LEVEL]
                 [--check-config] [--dry-run] [--discover] [--capture PATH]
+                [--health [--health-timeout SECONDS]]
 ```
 
 | Flag | Purpose |
@@ -169,6 +169,7 @@ freeathome2mqtt [--config PATH] [--data-dir PATH] [--log-level LEVEL]
 | `--dry-run` | Full startup — connect, fetch, compile — then print the entity table and exit **without publishing anything.** The single most useful flag for a new user: it answers "what will this create?" before it creates it. |
 | `--discover` | mDNS-scan for SysAPs (`_http._tcp.local.`, name `free@home*`) and print candidates |
 | `--capture PATH` | Record the live configuration and a WebSocket session into a test fixture ([`docs/10 §3`](10-testing.md#3-fixtures-and-the-fake-sysap)), with serials and names pseudonymised |
+| `--health` | Read the retained `<base>/bridge/state` from the broker and exit 0 only if it is `online`. What the container `HEALTHCHECK` runs: unlike `--check-config` it asks the *running* bridge, so a hung-but-alive process fails it. `--health-timeout` (default 5 s) bounds the wait. |
 
 `--capture` is what turns a user's bug report into a regression test, and pseudonymisation is what
 makes them willing to send it.

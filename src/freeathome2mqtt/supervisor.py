@@ -25,8 +25,10 @@ merged onto its entity's auto-built discovery payload (`homeassistant/discovery.
 only take hold on the next `_rebuild_dependents`/`_compile_and_build_discovery` call, i.e. a
 resync -- see `_handle_entity_options`'s own docstring for why setting any of them triggers one.
 
-Not yet wired here, by design: a 404-on-write-triggers-resync hook (docs/06 §4.1's last row -- a
-real gap, deferred rather than bolted on without an acceptance test to pin its shape down).
+A `404` on a datapoint write reaches the same `_ReloadDebouncer` a topology frame does, via
+`CommandDispatcher`'s `on_topology_changed` callback (docs/06 §4.1's last row, wired in WP18):
+the datapoint is gone, so the compiled model is stale, and the response is one debounced resync
+rather than a per-failure config fetch.
 """
 
 from __future__ import annotations
@@ -476,6 +478,9 @@ class SupervisorConfig:
     compile_options: CompileOptions = field(default_factory=CompileOptions)
     data_dir: Path = field(default_factory=lambda: Path("/data"))
     coalesce_ms: int = 20
+    coalesce_adaptive: bool = False
+    coalesce_max_ms: int = 200
+    coalesce_burst_threshold: int = 25
     publish_last_changed: bool = True
     command_debounce_s: float = 0.05
     default_optimistic: bool = True
@@ -1006,6 +1011,9 @@ class Supervisor:
             state=state,
             mqtt=mqtt,
             coalesce_ms=self._config.coalesce_ms,
+            coalesce_adaptive=self._config.coalesce_adaptive,
+            coalesce_max_ms=self._config.coalesce_max_ms,
+            coalesce_burst_threshold=self._config.coalesce_burst_threshold,
             publish_last_changed=self._config.publish_last_changed,
             qos_state=self._config.mqtt_qos_state,
             metrics=self.metrics,
@@ -1027,6 +1035,10 @@ class Supervisor:
             optimistic_overrides=self._entity_optimistic_overrides(model),
             debounce_overrides=self._entity_debounce_overrides(model),
             metrics=self.metrics,
+            # docs/06 §4.1's last row, wired in WP18: a 404 on a write means the topology moved
+            # under the compiled model. It goes through the same debouncer a topology *frame*
+            # uses (P-55), so a burst of failed writes costs one config fetch, not N.
+            on_topology_changed=self._reload_debouncer.request,
         )
 
     # ------------------------------------------------------------------- live callbacks (WP8)

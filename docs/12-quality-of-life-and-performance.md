@@ -109,6 +109,10 @@ in parallel with it.
 
 ## 3. WP13 — Measure what is already claimed
 
+> **Landed.** `bench_memory` and `bench_idle` exist; `tools/compare_bench.py` gates five
+> benchmarks instead of one. Measured: **48.6 MB** RSS at 1 000 entities (P9 budget 120 MB) and
+> **0.04 %** of one core at idle (P10 budget 0.5 %). See [§3.1](#31-what-the-measurements-showed).
+
 **Why now** Two budgets ([§1.1](#11-two-of-the-twelve-budgets-have-never-been-measured)) have no
 benchmark, and the relative-regression gate covers one of the eight bench tests
 ([§1.2](#12-relative-regression-gating-covers-one-benchmark-of-eight)). Everything downstream in
@@ -151,11 +155,40 @@ which is the assertion that proves the new entries are actually gated and not me
 [`docs/05 §8`](05-performance.md#8-benchmarks); [`docs/10 §7`](10-testing.md#7-benchmarks)'s tracked
 improvement.
 
-**Size** S. No production code changes at all, which is what makes it the right thing to do first.
+**Size** S.
+
+### 3.1 What the measurements showed
+
+Three things came out of actually running this that the plan could only guess at.
+
+**The memory budget passes with room to spare, and docs/05 §6's estimate was right.** 48.6 MB RSS
+at 1 000 entities in a clean interpreter, of which ~6.6 MB is the compiled model itself — against
+§6's predicted ~6 MB for the `Entity` objects, ingress dict, values and discovery payloads
+combined. At the 2 500-channel stress target it is 58.8 MB. The Python baseline dominates, exactly
+as §6 says it does.
+
+**Not every measurement can carry a relative gate.** Across five full bench runs, four async
+measurements were stable to within 0–7 % run to run (`p1_p99`, `p2_p99`, `rss_kib`,
+`cold_start`) and three were not (`drain_tail` up to 444 %, `resync` up to 96 %, `cpu_fraction` up
+to 34 %). All three unstable ones are measurements whose absolute value is tiny — milliseconds, or
+a 0.0003 CPU fraction — so run-to-run jitter swamps any real change. Gating them would have bought
+a flaky CI job rather than a safety net, so the baseline carries the four stable ones plus
+`bench_compile`, and `compare_bench.py` prints how many recorded benchmarks are *not* gated so the
+distinction stays visible rather than silent. The full table is in `tests/bench/_record.py`.
+
+**One existing benchmark was not measuring its own budget.** `bench_resync` started its clock only
+after a poll loop had *observed* `reconnect_count` increase — by which point the resync, fired from
+the same `on_connected` hook that increments that counter, had usually already finished. It was
+reporting 10–15 microseconds against a 1.5 s budget: passing, but measuring nothing. The clock now
+starts at the drop, which gives the interval a defined beginning at the cost of including the
+configured reconnect backoff. The test's request-count assertion had been carrying it alone.
 
 ---
 
 ## 4. WP14 — Make the bridge observable
+
+> **Landed.** All five missing `stats` keys have real sources; `latency_ms` comes from a
+> fixed-bucket histogram whose memory is constant under a million observations.
 
 **Why now** [`docs/04 §4.2`](04-mqtt-interface.md#42-bridgeinfo) specifies a `stats` object; five of
 its keys have no counter anywhere, which `supervisor._build_bridge_info`'s docstring already records
@@ -208,6 +241,20 @@ before the package lands. WP13 exists partly so that this check is possible.
 [`docs/05 §9`](05-performance.md#9-profiling-recipe) executable in production.
 
 **Size** M.
+
+### 4.1 What implementation changed about the plan
+
+The plan proposed reporting an out-of-range percentile as a sentinel. The property test
+`test_percentiles_are_monotonic_for_any_sample_set` rejected it immediately: a sentinel that sorts
+below the other two values makes the object self-contradictory (`p99` below `p50`). The shipped
+design clamps such a quantile to the last bucket bound so the three stay ordered, and publishes
+`over_<bound>ms` beside them so the clamp never hides anything silently. This is the property test
+doing the job it was specified for, one commit after being written.
+
+Wiring also surfaced that `Supervisor` was constructing `Publisher` and `CommandDispatcher`
+without passing its own shared `Metrics` instance — so even once the counters existed they would
+have counted into throwaway objects. `test_bridge_info_stats_match_documented_shape` drives a real
+datapoint through the pipeline rather than only checking that keys exist, which is what caught it.
 
 ---
 

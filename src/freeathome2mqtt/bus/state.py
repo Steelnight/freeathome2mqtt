@@ -1,13 +1,17 @@
-"""``StateStore``: values, the dirty set and unconfirmed-command marks (ADR-005; docs/11 WP5).
+"""``StateStore``: values, the dirty set and unconfirmed-command marks (ADR-005; docs/11 WP5;
+docs/12 WP14).
 
 Sized once from the compiled `entities` list and never resized afterward -- a new device requires
-a recompile, not a mutation of this store (docs/03 §2, docs/05 §3 R3: no unbounded growth).
+a recompile, not a mutation of this store (docs/03 §2, docs/05 §3 R3: no unbounded growth). That
+applies to `first_dirty_at` too: it is a `list[float]` indexed by entity, allocated with the rest,
+not a dict that grows as entities are touched.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from freeathome2mqtt.model.entity import Entity
@@ -16,11 +20,19 @@ from freeathome2mqtt.model.entity import Entity
 class StateStore:
     """Owns `values`, `dirty` and `unconfirmed` -- the only place they live (docs/02 §3)."""
 
-    def __init__(self, entities: Sequence[Entity]) -> None:
+    def __init__(
+        self, entities: Sequence[Entity], *, clock: Callable[[], float] = time.monotonic
+    ) -> None:
         self.values: list[list[Any]] = [[None] * len(e.attr_names) for e in entities]
         self.unconfirmed: list[int] = [0] * len(entities)
         self.dirty: set[int] = set()
         self.wake = asyncio.Event()
+        self._clock = clock
+        # When each entity *became* dirty, for the publish-latency histogram (docs/04 §4.2's
+        # `latency_ms`, docs/12 WP14). A parallel list, not a side dict: docs/05 §6 names an
+        # unpruned per-entity side dict as one of two known unbounded-growth traps, and
+        # prescribes exactly this shape ("store it in the entity's slot, not a side dict").
+        self.first_dirty_at: list[float] = [0.0] * len(entities)
 
     def seed(self, entity_idx: int, attr_idx: int, value: Any) -> None:
         """Set an initial value without marking dirty (startup/resync snapshot apply)."""
@@ -42,8 +54,7 @@ class StateStore:
         if slot[attr_idx] == value:
             return False
         slot[attr_idx] = value
-        self.dirty.add(entity_idx)
-        self.wake.set()
+        self._mark_dirty(entity_idx)
         return True
 
     def mark_optimistic(self, entity_idx: int, attr_idx: int, value: Any, *, attr_bit: int) -> None:
@@ -55,7 +66,19 @@ class StateStore:
         """
         self.values[entity_idx][attr_idx] = value
         self.unconfirmed[entity_idx] |= attr_bit
-        self.dirty.add(entity_idx)
+        self._mark_dirty(entity_idx)
+
+    def _mark_dirty(self, entity_idx: int) -> None:
+        """Mark dirty and, on the clean -> dirty *edge* only, stamp when the wait began.
+
+        The `not in` test is what keeps this off the per-datapoint cost: a 500-datapoint burst
+        across 40 entities takes 40 clock readings, not 500, and a second change to an
+        already-dirty entity keeps the earlier (correct) start time rather than resetting it --
+        otherwise measured latency would shrink the busier the bridge got.
+        """
+        if entity_idx not in self.dirty:
+            self.first_dirty_at[entity_idx] = self._clock()
+            self.dirty.add(entity_idx)
         self.wake.set()
 
     def take_dirty(self) -> set[int]:

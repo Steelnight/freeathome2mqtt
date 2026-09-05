@@ -60,7 +60,7 @@ from freeathome2mqtt.bus.reconcile import RateLimiter, Reconciler
 from freeathome2mqtt.bus.state import StateStore
 from freeathome2mqtt.homeassistant.components import DiscoveryOptions
 from freeathome2mqtt.homeassistant.discovery import DiscoveryPublisher, build_model_discovery
-from freeathome2mqtt.metrics import Metrics
+from freeathome2mqtt.metrics import MAX_BUCKET_MS, Metrics
 from freeathome2mqtt.metrics_server import MetricsServer
 from freeathome2mqtt.model.compiler import CompileOptions, Model
 from freeathome2mqtt.model.compiler import compile as compile_model
@@ -1002,6 +1002,7 @@ class Supervisor:
             coalesce_ms=self._config.coalesce_ms,
             publish_last_changed=self._config.publish_last_changed,
             qos_state=self._config.mqtt_qos_state,
+            metrics=self.metrics,
         )
         self._rate_limiter = rate_limiter
         self._reconciler = reconciler
@@ -1019,6 +1020,7 @@ class Supervisor:
             default_optimistic=self._config.default_optimistic,
             optimistic_overrides=self._entity_optimistic_overrides(model),
             debounce_overrides=self._entity_debounce_overrides(model),
+            metrics=self.metrics,
         )
 
     # ------------------------------------------------------------------- live callbacks (WP8)
@@ -1363,11 +1365,13 @@ class Supervisor:
         return {"info": self._build_bridge_info(), "checks": checks}
 
     def _build_bridge_info(self) -> dict[str, Any]:
-        """`bridge/info` (docs/04 §4.2). A first cut: every field that already has a real source
-        (compile stats, availability, reconnect counters, `entities.json`-adjacent config) is
-        populated; `stats.commands`/`command_errors`/`state_publishes`/`latency_ms` have no
-        counter anywhere yet (`CommandDispatcher`/`Publisher` don't track them) and are a real,
-        named gap for a later WP, not silently fabricated.
+        """`bridge/info` (docs/04 §4.2), complete as of WP13-18's WP14.
+
+        Every field docs/04 §4.2's example shows now has a real source behind it.
+        `stats.commands`/`command_errors`/`state_publishes`/`ws_frames`/`latency_ms` used to be
+        absent -- they had no counter anywhere -- which mattered more than a missing field:
+        docs/05 §9 step 4's profiling recipe tells an operator to read exactly these to localise
+        a problem to ingress, egress or the broker, and they did not exist.
         """
         availability = self._availability
         model = self._model
@@ -1392,17 +1396,27 @@ class Supervisor:
         if self._rest is not None and self._rest.sysap_uuid is not None:
             sysap["uuid"] = self._rest.sysap_uuid
 
+        latency = self.metrics.latency
         stats_body: dict[str, Any] = {
             "uptime_s": round(time.monotonic() - self._started_at, 1)
             if self._started_at is not None
             else 0.0,
+            "ws_frames": self.metrics.ws_frames,
             "datapoints_in": self.metrics.datapoints_in,
             "unmapped_datapoints": self.metrics.unmapped_datapoints,
+            "state_publishes": self.metrics.state_publishes,
             "events": self.metrics.events,
+            "commands": self.metrics.commands,
+            "command_errors": self.metrics.command_errors,
             "codec_errors": self.metrics.codec_errors,
             "config_reloads": self.metrics.config_reloads,
             "task_restarts": self.metrics.task_restarts,
+            "latency_ms": latency.percentiles(),
         }
+        if latency.over_max_count:
+            # Only present when it is non-zero, so its appearance is itself the signal. A clamped
+            # p99 (docs/12 WP14, metrics.MAX_BUCKET_MS) would otherwise hide these entirely.
+            stats_body["latency_ms"][f"over_{MAX_BUCKET_MS}ms"] = latency.over_max_count
         if self._ws is not None:
             stats_body["reconnects_ws"] = self._ws.reconnect_count
         if self._mqtt is not None:
@@ -1424,6 +1438,7 @@ class Supervisor:
             "config": {
                 "base_topic": self._config.base_topic,
                 "topic_style": self._config.compile_options.topic_style,
+                "homeassistant": self._config.homeassistant_enabled,
                 "coalesce_ms": self._config.coalesce_ms,
                 "max_inflight": self._config.sysap_max_inflight,
             },

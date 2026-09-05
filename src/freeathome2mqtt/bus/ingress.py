@@ -57,6 +57,10 @@ class Ingress:
 
     def process_frame(self, body: WsFrameBody) -> None:
         """Handle one frame's ``datapoints`` (docs/02 §4 step 2). Awaits nothing (rule R1)."""
+        # Counted before the early return below: a `devices`/`devicesAdded` frame carries no
+        # datapoints but is still a frame the WebSocket delivered, and `ws_frames` disagreeing
+        # with the wire would make the docs/05 §9 "is this ingress or egress?" triage wrong.
+        self._metrics.ws_frames += 1
         datapoints = body.get("datapoints")
         if not datapoints:
             return

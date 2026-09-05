@@ -28,6 +28,8 @@ from freeathome2mqtt.model.entity import AttrKind, Binding, Entity
 from freeathome2mqtt.mqtt.client import MqttClient
 from freeathome2mqtt.sysap.ws import WsReader
 
+from . import _record
+
 pytestmark = pytest.mark.bench
 
 SERIAL = "ABB7F500E17A"
@@ -198,9 +200,13 @@ async def _measure_single_datapoint_latencies(*, coalesce_ms: int) -> list[float
 
 async def test_bench_latency_meets_p1_budget_with_default_coalescing() -> None:
     latencies = await _measure_single_datapoint_latencies(coalesce_ms=20)
-    assert _p99(latencies) <= _P1_BUDGET_SECONDS
+    p99 = _p99(latencies)
+    _record.record("tests/bench/test_bench_latency.py::p1_p99_seconds", p99)
+    assert p99 <= _P1_BUDGET_SECONDS
 
 
 async def test_bench_latency_meets_p2_budget_with_coalescing_disabled() -> None:
     latencies = await _measure_single_datapoint_latencies(coalesce_ms=0)
-    assert _p99(latencies) <= _P2_BUDGET_SECONDS
+    p99 = _p99(latencies)
+    _record.record("tests/bench/test_bench_latency.py::p2_p99_seconds", p99)
+    assert p99 <= _P2_BUDGET_SECONDS

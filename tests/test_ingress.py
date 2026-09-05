@@ -452,3 +452,47 @@ async def test_ws_reader_never_awaits_io() -> None:
     # 100 x 0.3s slow publishes would take 30s if ingestion were blocked on the publisher; a
     # generous 5s bound conclusively shows it never was.
     assert elapsed < 5.0
+
+
+# ------------------------------------------------------------------ WP14: the ws_frames counter
+
+
+def test_every_frame_counts_towards_ws_frames() -> None:
+    """docs/04 §4.2's `ws_frames`. Counted here rather than in `WsReader` because every frame
+    body already passes through `process_frame`, so no new plumbing is needed for it.
+    """
+    metrics = Metrics()
+    entities = [_entity(0, ("state",))]
+    ingress = Ingress(
+        entities=entities,
+        ingress_table=_table(0, "int"),
+        state=StateStore(entities),
+        events=_FakeEvents(),
+        metrics=metrics,
+    )
+
+    ingress.process_frame({"datapoints": {_key(0): "1"}})
+    ingress.process_frame({"datapoints": {_key(0): "2"}})
+
+    assert metrics.ws_frames == 2
+    assert metrics.datapoints_in == 2
+
+
+def test_a_frame_carrying_no_datapoints_still_counts_as_a_frame() -> None:
+    """A `devices` or `devicesAdded` frame is a frame. Counting only datapoint-bearing ones would
+    make `ws_frames` disagree with what the WebSocket actually delivered.
+    """
+    metrics = Metrics()
+    entities = [_entity(0, ("state",))]
+    ingress = Ingress(
+        entities=entities,
+        ingress_table=_table(0, "int"),
+        state=StateStore(entities),
+        events=_FakeEvents(),
+        metrics=metrics,
+    )
+
+    ingress.process_frame({"devicesAdded": ["ABB7F500E17A"]})
+
+    assert metrics.ws_frames == 1
+    assert metrics.datapoints_in == 0

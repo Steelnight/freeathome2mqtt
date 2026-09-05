@@ -14,6 +14,7 @@ import pytest
 from fakes.fake_broker import running_fake_broker
 from freeathome2mqtt.bus.publisher import Publisher
 from freeathome2mqtt.bus.state import StateStore
+from freeathome2mqtt.metrics import Metrics
 from freeathome2mqtt.model.entity import AttrKind, Entity
 from freeathome2mqtt.mqtt.client import MqttClient, MqttClientNotConnectedError
 
@@ -314,3 +315,94 @@ async def test_run_publishes_immediately_when_coalesce_ms_is_zero() -> None:
                     await run_task
         finally:
             await _stop(client, task)
+
+
+# ------------------------------------------------------------------- WP14 test helpers
+
+
+class _FakeClock:
+    """A monotonic clock under the test's control (docs/06 §6 F20)."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class _RecordingMqtt:
+    """Stands in for `MqttClient` where the test is about counters, not wire behaviour."""
+
+    def __init__(self) -> None:
+        self.published: list[tuple[str, bytes]] = []
+
+    async def publish(self, topic: str, payload: bytes, **_kwargs: object) -> None:
+        self.published.append((topic, payload))
+
+
+class _FailingMqtt:
+    async def publish(self, topic: str, payload: bytes, **_kwargs: object) -> None:
+        raise MqttClientNotConnectedError(topic)
+
+
+def _entities(count: int) -> list[Entity]:
+    return [_entity(i, ("state", "brightness")) for i in range(count)]
+
+
+# --------------------------------------------- WP14: state_publishes and the latency histogram
+
+
+async def test_flush_counts_one_state_publish_per_entity_not_per_attribute() -> None:
+    """docs/04 §4.2's `state_publishes`. Tied to P4: a burst across N entities is N publishes,
+    however many datapoints it carried (ADR-005, docs/05 §3 R6).
+    """
+    entities = _entities(3)
+    state = StateStore(entities)
+    metrics = Metrics()
+    mqtt = _RecordingMqtt()
+    publisher = Publisher(entities=entities, state=state, mqtt=mqtt, metrics=metrics)
+
+    for entity_idx in range(3):
+        for attr_idx in range(2):
+            state.apply(entity_idx, attr_idx, f"v{entity_idx}{attr_idx}")
+    await publisher.flush()
+
+    assert metrics.state_publishes == 3
+
+
+async def test_flush_observes_publish_latency_from_when_the_entity_became_dirty() -> None:
+    clock = _FakeClock()
+    entities = _entities(1)
+    state = StateStore(entities, clock=clock)
+    metrics = Metrics()
+    publisher = Publisher(
+        entities=entities, state=state, mqtt=_RecordingMqtt(), metrics=metrics, monotonic=clock
+    )
+
+    clock.now = 10.000
+    state.apply(0, 0, "on")
+    clock.now = 10.021  # 21 ms later -> the 25 ms bucket
+    await publisher.flush()
+
+    assert metrics.latency.total == 1
+    assert metrics.latency.percentiles()["p50"] == 25
+
+
+async def test_a_failed_publish_counts_neither_a_publish_nor_a_latency_sample() -> None:
+    """F6 (docs/06 §6): an entity that did not reach the broker stays dirty for the next flush.
+    Counting it here would overstate throughput and understate latency at exactly the moment the
+    broker is in trouble.
+    """
+    entities = _entities(1)
+    state = StateStore(entities)
+    metrics = Metrics()
+    mqtt = _FailingMqtt()
+    publisher = Publisher(entities=entities, state=state, mqtt=mqtt, metrics=metrics)
+
+    state.apply(0, 0, "on")
+    with pytest.raises(MqttClientNotConnectedError):
+        await publisher.flush()
+
+    assert metrics.state_publishes == 0
+    assert metrics.latency.total == 0
+    assert state.dirty == {0}

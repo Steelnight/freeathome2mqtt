@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 import orjson
 
+from freeathome2mqtt.metrics import Metrics
 from freeathome2mqtt.model.codecs import CommandError
 from freeathome2mqtt.model.entity import AttrKind
 from freeathome2mqtt.model.transforms import get_transform
@@ -71,6 +72,7 @@ class CommandDispatcher:
         default_optimistic: bool = True,
         optimistic_overrides: Mapping[int, bool] | None = None,
         debounce_overrides: Mapping[int, float] | None = None,
+        metrics: Metrics | None = None,
     ) -> None:
         self._entities = entities
         self._egress = egress
@@ -87,6 +89,7 @@ class CommandDispatcher:
         # above, keyed by entity idx (rebuilt from entities.json on every resync, docs/07 §4.1).
         self._optimistic_overrides = optimistic_overrides or {}
         self._debounce_overrides = debounce_overrides or {}
+        self._metrics = metrics if metrics is not None else Metrics()
 
         self._ordered_commands: dict[int, list[str]] = {}
         for entity_idx, cmd_name in egress:
@@ -284,6 +287,11 @@ class CommandDispatcher:
             if binding.confirm:
                 self._reconciler.schedule(entity_idx, attr_idx)
 
+        # docs/04 §4.2's `commands`, counted here: after validation (so a rejected message is an
+        # error, not a command) and before the debouncer (so the figure says how much is being
+        # asked of the bridge, which is the question docs/05 §9 step 4 uses it to answer -- the
+        # write count that survives debouncing is a different, deliberately different number).
+        self._metrics.commands += 1
         self._enqueue_write(entity_idx, cmd_name, encoded, binding, transaction)
         return True
 
@@ -382,6 +390,9 @@ class CommandDispatcher:
     async def _respond_error(
         self, entity_idx: int, transaction: str | None, command: str, error: str
     ) -> None:
+        # The single funnel for every command rejection -- validation, unknown command, unknown
+        # attribute, rate limit -- so `command_errors` is counted here exactly once per error.
+        self._metrics.command_errors += 1
         payload: dict[str, Any] = {
             "status": "error",
             "error": error,

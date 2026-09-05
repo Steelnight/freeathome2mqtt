@@ -187,7 +187,25 @@ so routine reconnects do not flap Home Assistant.
 ```
 
 Republished on change and at most every 30 s. `stats` makes the performance claims in
-[`docs/05`](05-performance.md) observable in production without a metrics stack.
+[`docs/05`](05-performance.md) observable in production without a metrics stack — which is what
+[`docs/05 §9`](05-performance.md#9-profiling-recipe) step 4 depends on ("instrument counters
+rather than guessing").
+
+`latency_ms` is derived from a **fixed-bucket histogram** (`metrics.LatencyHistogram`), not from
+stored samples: a reservoir that grew with the publish rate would break
+[`docs/05 §3`](05-performance.md#3-the-hot-path-rules) R5, so each percentile is the upper bound of
+the bucket the quantile falls into rather than an interpolated figure. Two consequences worth
+knowing when reading one:
+
+- Before any publish has happened the three values are `null`, not `0` — "nothing measured yet"
+  and "everything was instant" are different facts.
+- A percentile past the last bucket bound reports that bound, so the three stay ordered. When
+  that clamp is hiding anything, an extra `over_<bound>ms` key appears alongside with the count,
+  and its presence is itself the signal.
+
+The timestamp each sample is measured from is the moment the entity went from clean to dirty
+(`StateStore.first_dirty_at`), so what is reported is the latency a *consumer* experiences —
+including the coalescing wait — rather than the bridge's internal processing time only.
 
 ### 4.3 `bridge/devices`
 

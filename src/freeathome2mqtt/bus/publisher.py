@@ -1,4 +1,5 @@
-"""Coalescing publish loop, payload building and retained publish (ADR-005; docs/11 WP5).
+"""Coalescing publish loop, payload building and retained publish (ADR-005; docs/11 WP5;
+docs/12 WP14).
 
 `run()` is a long-lived task with no resource of its own to close gracefully (docs/02 §8's "flush
 the publisher's dirty set" on shutdown is the caller calling `flush()` directly) -- so its exit
@@ -10,12 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import orjson
 
+from freeathome2mqtt.metrics import Metrics
 from freeathome2mqtt.model.entity import AttrKind, Entity
 from freeathome2mqtt.model.transforms import get_transform
 
@@ -43,6 +46,8 @@ class Publisher:
         publish_last_changed: bool = True,
         qos_state: int = 0,
         clock: Callable[[], datetime] = _utcnow,
+        metrics: Metrics | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._entities = entities
         self._state = state
@@ -51,6 +56,11 @@ class Publisher:
         self._publish_last_changed = publish_last_changed
         self._qos_state = qos_state
         self._clock = clock
+        # `clock` is wall-clock, for the `last_changed` *payload* field; `monotonic` is the
+        # separate, never-jumping clock every measurement uses (docs/06 §6 F20). Two clocks
+        # because they answer two different questions, not by oversight.
+        self._monotonic = monotonic
+        self._metrics = metrics if metrics is not None else Metrics()
         self.publish_count = 0
 
     def build_payload(self, entity_idx: int) -> dict[str, Any]:
@@ -93,5 +103,11 @@ class Publisher:
             entity = self._entities[idx]
             payload = orjson.dumps(self.build_payload(idx))
             await self._mqtt.publish(entity.state_topic, payload, qos=self._qos_state, retain=True)
+            # Counted only after the publish actually succeeded, for the same reason the dirty
+            # index is only discarded after it (F6): an entity the broker never received is not
+            # a publish, and charging it a latency sample would flatter the histogram at exactly
+            # the moment the broker is in trouble.
             self._state.dirty.discard(idx)
             self.publish_count += 1
+            self._metrics.state_publishes += 1
+            self._metrics.latency.observe(self._monotonic() - self._state.first_dirty_at[idx])

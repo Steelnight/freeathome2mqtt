@@ -19,7 +19,7 @@ import pytest
 
 from fakes.fake_broker import free_port, running_fake_broker
 from fakes.fake_sysap import FakeSysAp, running_fake_sysap
-from freeathome2mqtt.metrics import Metrics
+from freeathome2mqtt.metrics import LatencyHistogram, Metrics
 from freeathome2mqtt.model.compiler import CompileOptions, CompileStats, Model
 from freeathome2mqtt.model.compiler import compile as compile_model
 from freeathome2mqtt.model.entity import AttrKind, Entity
@@ -2299,6 +2299,73 @@ async def test_bridge_info_never_contains_sysap_or_mqtt_secrets(tmp_path: Path) 
         finally:
             await supervisor.stop()
             await asyncio.wait_for(task, timeout=5.0)
+
+
+# ----------------------------------------------------- WP14: the complete bridge/info stats
+
+
+async def test_bridge_info_stats_match_documented_shape(tmp_path: Path) -> None:
+    """WP14's acceptance test: every key docs/04 §4.2's example shows is present and typed.
+
+    Before WP14, five of them (`ws_frames`, `state_publishes`, `commands`, `command_errors`,
+    `latency_ms`) had no counter behind them and were simply absent -- which made docs/05 §9's
+    own profiling recipe impossible to follow in production.
+    """
+    async with (
+        running_fake_broker() as broker,
+        running_fake_sysap(FakeSysAp()) as (fake, http_client),
+    ):
+        fake.set_configuration(_configuration({SERIAL: _switch_device(SERIAL)}))
+        supervisor = Supervisor(
+            config=_config(tmp_path, broker.port, http_client),
+            profiles=REGISTRY,
+            http_session=http_client.session,
+        )
+        task = asyncio.create_task(supervisor.run())
+        try:
+            await _wait_until(lambda: supervisor._cold_start_done)
+            # Drive one real datapoint change through the whole pipeline, so the assertions
+            # below are about counters that actually counted something rather than about
+            # keys that merely exist.
+            publishes_before = supervisor.metrics.state_publishes
+            await fake.push_ws_frame({"datapoints": {f"{SERIAL}/ch0000/odp0000": "1"}})
+            await _wait_until(lambda: supervisor.metrics.ws_frames >= 1)
+            await _wait_until(lambda: supervisor.metrics.state_publishes > publishes_before)
+            info = supervisor._build_bridge_info()
+        finally:
+            await supervisor.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+    stats = info["stats"]
+    for key in (
+        "uptime_s",
+        "ws_frames",
+        "datapoints_in",
+        "unmapped_datapoints",
+        "state_publishes",
+        "events",
+        "commands",
+        "command_errors",
+        "reconnects_ws",
+        "reconnects_mqtt",
+        "config_reloads",
+        "codec_errors",
+        "latency_ms",
+    ):
+        assert key in stats, f"docs/04 §4.2 documents stats.{key}, and it is missing"
+    assert set(stats["latency_ms"]) >= {"p50", "p95", "p99"}
+    # docs/04 §4.2's `config` block shows `homeassistant`; it was the one key the code omitted.
+    assert "homeassistant" in info["config"]
+    # The whole point of the exercise: these are real numbers, not placeholders.
+    assert stats["ws_frames"] >= 1
+    assert stats["state_publishes"] >= 1
+
+
+async def test_bridge_info_latency_is_null_before_anything_has_been_published() -> None:
+    """An empty histogram reports `null`, not `0`: "no samples yet" and "everything took under a
+    millisecond" are different facts and must not render identically.
+    """
+    assert LatencyHistogram().percentiles() == {"p50": None, "p95": None, "p99": None}
 
 
 # ------------------------------------------------------------------------ virtualdevice/create

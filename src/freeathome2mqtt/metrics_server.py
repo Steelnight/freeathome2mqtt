@@ -26,13 +26,41 @@ _COUNTER_FIELDS: tuple[str, ...] = (
     "codec_errors",
     "task_restarts",
     "config_reloads",
+    # docs/12 WP14: the four docs/04 §4.2 `stats` counters that had no source before it.
+    "ws_frames",
+    "state_publishes",
+    "commands",
+    "command_errors",
 )
+
+_LATENCY_METRIC = "freeathome2mqtt_publish_latency_ms"
+
+
+def _render_latency_histogram(metrics: Metrics) -> list[str]:
+    """The publish-latency histogram in Prometheus's own histogram convention (docs/12 WP14).
+
+    Buckets are **cumulative** and the series ends with `le="+Inf"`, which is not a stylistic
+    choice: a scraper fed non-cumulative buckets computes silently wrong quantiles rather than
+    erroring, so getting this shape right is the difference between a useful panel and a
+    plausible-looking lie.
+    """
+    histogram = metrics.latency
+    lines = [
+        f"# HELP {_LATENCY_METRIC} WS frame to MQTT publish latency, milliseconds.",
+        f"# TYPE {_LATENCY_METRIC} histogram",
+    ]
+    for bound, cumulative in histogram.cumulative_buckets():
+        label = "+Inf" if bound is None else str(bound)
+        lines.append(f'{_LATENCY_METRIC}_bucket{{le="{label}"}} {cumulative}')
+    lines.append(f"{_LATENCY_METRIC}_sum {histogram.total_ms:.3f}")
+    lines.append(f"{_LATENCY_METRIC}_count {histogram.total}")
+    return lines
 
 
 def render_prometheus_text(metrics: Metrics) -> bytes:
-    """Every counter in `metrics.Metrics`, Prometheus text exposition format (one `# HELP`/
-    `# TYPE`/value triple each, all typed `counter` -- every field here is monotonically
-    increasing, docs/06 §4.2's `stats` names).
+    """Every counter in `metrics.Metrics` plus the latency histogram, Prometheus text exposition
+    format (one `# HELP`/`# TYPE`/value triple each; the counters are all monotonically
+    increasing, docs/04 §4.2's `stats` names).
     """
     lines: list[str] = []
     for field in _COUNTER_FIELDS:
@@ -40,6 +68,7 @@ def render_prometheus_text(metrics: Metrics) -> bytes:
         lines.append(f"# HELP {name} {field.replace('_', ' ')}.")
         lines.append(f"# TYPE {name} counter")
         lines.append(f"{name} {getattr(metrics, field)}")
+    lines.extend(_render_latency_histogram(metrics))
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 

@@ -22,6 +22,8 @@ from fakes.fake_sysap import FakeSysAp, running_fake_sysap
 from freeathome2mqtt.model.profiles import load_profile_registry
 from freeathome2mqtt.supervisor import Supervisor, SupervisorConfig
 
+from . import _record
+
 pytestmark = pytest.mark.bench
 
 PROFILES_DIR = (
@@ -98,6 +100,7 @@ async def test_bench_startup_1000_channels_meets_p6_budget(tmp_path: Path) -> No
         try:
             await _wait_until(lambda: supervisor._cold_start_done)
             elapsed = time.monotonic() - start
+            _record.record("tests/bench/test_bench_startup.py::cold_start_seconds", elapsed)
             assert supervisor._model is not None
             assert len(supervisor._model.entities) == 1000
             assert elapsed <= _P6_BUDGET_SECONDS, (

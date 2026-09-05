@@ -223,6 +223,34 @@
                 ],
                 "iterations": 1
             }
+        },
+        {
+            "fullname": "tests/bench/test_bench_latency.py::p1_p99_seconds",
+            "name": "tests/bench/test_bench_latency.py::p1_p99_seconds",
+            "stats": {
+                "mean": 0.021523820500078727
+            }
+        },
+        {
+            "fullname": "tests/bench/test_bench_latency.py::p2_p99_seconds",
+            "name": "tests/bench/test_bench_latency.py::p2_p99_seconds",
+            "stats": {
+                "mean": 0.0008797420000519196
+            }
+        },
+        {
+            "fullname": "tests/bench/test_bench_memory.py::rss_kib",
+            "name": "tests/bench/test_bench_memory.py::rss_kib",
+            "stats": {
+                "mean": 49716
+            }
+        },
+        {
+            "fullname": "tests/bench/test_bench_startup.py::cold_start_seconds",
+            "name": "tests/bench/test_bench_startup.py::cold_start_seconds",
+            "stats": {
+                "mean": 1.222770680500048
+            }
         }
     ],
     "datetime": "2026-09-04T07:19:30.155492+00:00",

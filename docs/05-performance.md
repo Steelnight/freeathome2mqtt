@@ -242,13 +242,27 @@ so they are hermetic and can gate CI.
 | `bench_command_debounce` | 60 `/set` over 2 s on one continuous command | P5 |
 | `bench_startup` | Cold start against a 1 000-channel fixture | P6, P7 |
 | `bench_resync` | Kill the WS for 60 s with changes meanwhile, restore | P8; exactly 1 config request |
-| `bench_memory` | `tracemalloc` + RSS after 10 min steady state | P9; no growth trend over the window |
-| `bench_idle` | 10 min at 0.1 events/s | P10 |
+| `bench_memory` | `tracemalloc` + RSS at 1 000 entities under steady traffic² | P9; no growth trend over the window |
+| `bench_idle` | 0.1 events/s² | P10 |
 | `bench_dedup` | 10 000 frames all repeating current values | P12: zero publishes |
 | `bench_compile` | Compile only, 1 000 / 2 500 channels | P7; near-linear scaling |
 
-Results are written to `bench/results.json` and compared against a committed baseline; CI fails on a
-regression beyond tolerance. This turns the budgets above from aspiration into a contract.
+Results are written to `bench/results.json` (pytest-benchmark's own report, for `bench_compile`)
+and `bench/results-async.json` (`tests/bench/_record.py`, for the async benchmarks); both are
+compared against the committed baseline and CI fails on a regression beyond tolerance. This turns
+the budgets above from aspiration into a contract.
+
+² `bench_memory` and `bench_idle` shorten this document's original 10-minute windows the same way,
+and for the same reason (docs/12 WP13). Both properties are *rates or ratios* -- CPU per wall
+second, RSS growth across a window -- so they are visible within seconds; what a longer window
+adds is confidence about slow drift, which is exactly what the nightly soak test (docs/10 §8)
+covers. `bench_memory` splits the budget in two: the absolute footprint is measured in a clean
+child interpreter (this pytest process carries the harness, an embedded broker and sometimes
+coverage tracing, none of which ship in the container), while the growth trend is measured
+in-process against the real pipeline, where the harness's constant overhead cancels out of the
+ratio. Measured at the time of writing: **48.6 MB** RSS at 1 000 entities (of which ~6.6 MB is the
+compiled model itself, matching §6's table) and **0.04 %** of one core at idle -- both with
+substantial headroom against P9 and P10.
 
 ¹ Reduced from a 60 s soak for the per-PR bench suite (docs/11 WP6): the property under test --
 the coalescing loop's flush cadence keeping pace with the arrival rate, not accumulating a growing
